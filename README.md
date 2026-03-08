@@ -15,10 +15,15 @@ Use the button below to easily deploy OpenClaw to your Azure environment.
 
 在开始部署之前，您需要准备以下信息：
 
+- **SSH 公钥** (SSH Public Key)：用于稍后安全登录虚拟机
+
+如果您希望部署完成后立即接入 Azure OpenAI，还需要额外准备以下信息：
+
 - **Azure OpenAI 终结点** (Endpoint)：例如 `https://your-resource.cognitiveservices.azure.com/`
 - **模型部署名称** (Deployment Name)：您在 Azure OpenAI 中部署的模型名称，例如 `gpt-4o`
 - **API 密钥** (API Key)：您的 Azure OpenAI 访问密钥
-- **SSH 公钥** (SSH Public Key)：用于稍后安全登录虚拟机
+
+这三个 Azure OpenAI 参数要么全部填写，要么全部留空。
 
 如果你还没有 SSH 密钥对，可以参考下方操作系统的具体说明进行生成。
 
@@ -27,14 +32,15 @@ Use the button below to easily deploy OpenClaw to your Azure environment.
 1. 点击上方的 **Deploy to Azure** 按钮。
 2. 登录您的 Azure 账号。
 3. 在部署页面中，选择或创建一个 **资源组 (Resource Group)**。
-4. 填写表单中的必要参数：
-   - `vmName`：自定义您的虚拟机名称，例如 `openclaw-prod-001`
-   - `adminUsername`：SSH 登录用户名，推荐使用 `azureuser`
-   - `sshPublicKey`：粘贴您的 SSH **公钥** `.pub` 文件内容（非私钥）
-   - `vmSize`：虚拟机规格，保持默认的 `Standard_B2as_v2` 即可
-   - `azureOpenAiEndpoint`：您的 Azure OpenAI 终结点
-   - `azureOpenAiDeployment`：您的模型部署名称
-   - `azureOpenAiApiKey`：您的 Azure OpenAI API 密钥
+4. 填写表单中的参数：
+  - `vmName`：自定义您的虚拟机名称，例如 `openclaw-prod-001`
+  - `adminUsername`：SSH 登录用户名，默认值为 `azureuser`
+  - `sshPublicKey`：粘贴您的 SSH **公钥** `.pub` 文件内容（非私钥）
+  - `vmSize`：虚拟机规格，例如 `Standard_B2as_v2`
+  - `azureOpenAiEndpoint`：可选，您的 Azure OpenAI 终结点
+  - `azureOpenAiDeployment`：可选，您的模型部署名称
+  - `azureOpenAiApiKey`：可选，您的 Azure OpenAI API 密钥
+  - 上述三个 Azure OpenAI 参数要么全部填写，要么全部留空
 5. 点击**查看 + 创建**，然后点击**创建**提交部署。
 6. 等待部署完成。请耐心等待，直到所有资源（特别是扩展 `openclaw-bootstrap`）显示部署成功。
 7. 部署完成后，点击左侧的**输出 (Outputs)**，记录以下重要信息：
@@ -87,13 +93,13 @@ openclaw-approve-browser
 ### macOS / Linux 用户操作步骤
 
 #### 准备 SSH 密钥
-查看现有的公钥并复制整行内容到 Azure 表单：
-```bash
-cat ~/.ssh/id_ed25519.pub
-```
-如果没有密钥，请先运行以下命令生成：
+如果您还没有 SSH 密钥，请先运行以下命令生成一对新的 SSH 密钥：
 ```bash
 ssh-keygen -t ed25519 -C "openclaw-azure"
+```
+
+生成完成后，再运行以下命令查看公钥并复制整行内容到 Azure 表单：
+```bash
 cat ~/.ssh/id_ed25519.pub
 ```
 
@@ -134,6 +140,8 @@ az group create --name rg-openclaw-sea --location southeastasia
 
 ### 3. 执行部署命令
 在此命令中直接填入您的自定义参数。部署过程可能需要几分钟。
+
+如果您希望部署时同时配置 Azure OpenAI，请将 `azureOpenAiEndpoint`、`azureOpenAiDeployment`、`azureOpenAiApiKey` 三个参数一起填写；如果暂时不接入 Azure OpenAI，请将这三个参数一起省略。
 ```bash
 az deployment group create \
   --name openclaw-sea-20260307 \
@@ -148,6 +156,8 @@ az deployment group create \
     azureOpenAiDeployment="gpt-5.2" \
     azureOpenAiApiKey="replace-with-api-key"
 ```
+
+  如果您暂时不需要 Azure OpenAI，可以直接省略这三个参数；如果需要填写，则必须三个一起填写。
 
 ### 4. 查看部署输出
 部署成功后，控制台会输出大量的 JSON 信息，您可以在输出结果底部找到 `outputs` 节点，里面包含虚拟机的公网域名（`vmPublicFqdn`）。
@@ -230,220 +240,141 @@ openclaw-approve-browser
 ---
 
 <a id="en"></a>
-# English
+# English Deployment Guide
 
-## What this repository is
+This guide walks you through the full OpenClaw deployment process on Azure. After deployment finishes, you will have a configured Ubuntu virtual machine, a persistent data disk, an automatically assigned public domain name, and HTTPS access.
 
-This is a minimal end-user repository for one-click OpenClaw deployment on Azure.
+## 1. Prepare Deployment Information
 
-After deployment you get:
+Before you begin, prepare the following:
 
-- One Ubuntu VM
-- A persistent data disk mounted at `/data`
-- An Azure-generated public `*.cloudapp.azure.com` hostname
-- Automatic HTTPS via Caddy
-- OpenClaw connected to Azure OpenAI
-- Two helper commands: `openclaw-browser-url` and `openclaw-approve-browser`
+- **SSH Public Key**: used to log in to the virtual machine later
 
-## What users need before deployment
+If you want Azure OpenAI configured during deployment, also prepare the following:
 
-Prepare these values:
+- **Azure OpenAI Endpoint**: for example `https://your-resource.cognitiveservices.azure.com/`
+- **Deployment Name**: the model deployment name in Azure OpenAI, for example `gpt-4o`
+- **API Key**: your Azure OpenAI access key
 
-- `vmName`: VM name, for example `openclaw-sea-20260307`
-- `adminUsername`: SSH login username, for example `azureuser`
-- `sshPublicKey`: SSH public key content
-- `vmSize`: VM SKU, default `Standard_B2as_v2`
-- `azureOpenAiEndpoint`: for example `https://your-resource.cognitiveservices.azure.com/`
-- `azureOpenAiDeployment`: for example `gpt-5.2`
-- `azureOpenAiApiKey`: Azure OpenAI API key
+These three Azure OpenAI parameters must either all be provided or all be left empty.
 
-Users do not need to provide these values:
+If you do not have an SSH key pair yet, you can generate one by following the operating-system-specific instructions below.
 
-- `location`: automatically uses the resource group region
-- `Key pair name`: not required by OpenClaw
-- `OpenClaw Image`: fixed internally by the template
-- `Gateway Token`: generated automatically during deployment
+## 2. One-Click Deployment Workflow
 
-## One-click deployment steps
+1. Click the **Deploy to Azure** button above.
+2. Sign in to your Azure account.
+3. On the deployment page, select or create a **Resource Group**.
+4. Fill in the deployment parameters:
+   - `vmName`: your custom virtual machine name, for example `openclaw-prod-001`
+   - `adminUsername`: SSH login username, default is `azureuser`
+   - `sshPublicKey`: paste the content of your SSH **public key** `.pub` file, not the private key
+   - `vmSize`: virtual machine size, for example `Standard_B2as_v2`
+   - `azureOpenAiEndpoint`: optional, your Azure OpenAI endpoint
+   - `azureOpenAiDeployment`: optional, your Azure OpenAI deployment name
+   - `azureOpenAiApiKey`: optional, your Azure OpenAI API key
+   - The three Azure OpenAI parameters above must either all be provided or all be left empty
+5. Click **Review + create**, then click **Create** to submit the deployment.
+6. Wait for deployment to finish. In particular, wait until all resources, especially the `openclaw-bootstrap` extension, show as successfully deployed.
+7. After deployment finishes, open **Outputs** on the left and record the following:
+   - `vmPublicFqdn` (the public VM domain name used later for SSH login)
 
-1. Click the `Deploy to Azure` button above.
-2. Sign in to Azure.
-3. Select or create a resource group.
-4. Fill in the required parameters.
-5. Start deployment.
-6. Wait for the VM extension `openclaw-bootstrap` to finish successfully.
-7. Record the outputs:
-   - `vmPublicFqdn` (VM public domain name, used later for SSH login)
+## 3. Connect and Complete Initial Setup
 
-## How to fill the form
+Depending on your operating system, follow the steps below to log in to the virtual machine and obtain the access token.
 
-Recommended values:
+### Windows
 
-- `vmName`: for example `openclaw-prod-001`
-- `adminUsername`: recommended `azureuser`
-- `sshPublicKey`: paste the full content of your `.pub` file
-- `vmSize`: keep the default unless you need a different size
-- `azureOpenAiEndpoint`: your Azure OpenAI endpoint
-- `azureOpenAiDeployment`: your Azure model deployment name
-- `azureOpenAiApiKey`: your Azure OpenAI API key
-
-## Complete Windows steps
-
-### 1. Prepare your SSH key
-
-If you do not have an SSH key yet, first generate a new key pair in PowerShell:
-
+#### Prepare SSH keys
+If you do not have SSH keys yet, run the following command in PowerShell to generate a new key pair:
 ```powershell
 ssh-keygen -t ed25519 -C "openclaw-azure"
 ```
 
-Then print the public key:
-
+After the key pair is created, run the following command to print the public key, then paste it into the Azure deployment form:
 ```powershell
 Get-Content $env:USERPROFILE\.ssh\id_ed25519.pub
 ```
 
-Paste the full line into the Azure form field `sshPublicKey`.
-
-If Azure generated and downloaded a file such as `openclaw-key.pem`, that file is your private key for SSH login later. It is not the value to paste into the deployment form.
-
-### 2. Fix `.pem` file permissions after deployment
-
-Run this in PowerShell:
-
-```powershell
-$KeySrc = "$env:USERPROFILE\Downloads\openclaw-key.pem"
-$KeyDst = "$env:USERPROFILE\.ssh\openclaw-key.pem"
-
-New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.ssh" | Out-Null
-Copy-Item -Force $KeySrc $KeyDst
-
-icacls $KeyDst /inheritance:r
-icacls $KeyDst /remove:g "Users" "Authenticated Users" "Everyone" "BUILTIN\Administrators"
-icacls $KeyDst /grant:r "${env:USERNAME}:R"
-```
-
-### 3. SSH into the VM
-
-If you use the Azure-downloaded `.pem`:
-
-```powershell
-ssh -i "$env:USERPROFILE\.ssh\openclaw-key.pem" azureuser@<vmPublicFqdn>
-```
-
-If you use your own existing private key:
-
+#### SSH into the virtual machine
+Use your SSH private key, for example `id_ed25519`, to connect to the VM:
 ```powershell
 ssh -i "$env:USERPROFILE\.ssh\id_ed25519" azureuser@<vmPublicFqdn>
 ```
+*(Replace `<vmPublicFqdn>` with the domain name shown in the deployment outputs. Adjust the key path or file name if needed.)*
 
-### 4. Get the dashboard URL
-
-After login, run:
-
+#### Get the web dashboard URL
+After you log in successfully, run:
 ```bash
 openclaw-browser-url
 ```
-
-It prints a complete dashboard URL like:
-
+Example output:
 ```text
 Dashboard URL: https://your-hostname/#token=...
 ```
+Copy the full URL and open it in your browser.
 
-Open that full URL in your browser.
-
-### 5. If the UI says pairing is required
-
-Run on the VM:
-
+#### Authorize browser pairing
+If the browser page shows `pairing required`, keep the page open, return to your SSH terminal, and run:
 ```bash
 openclaw-approve-browser
 ```
+After the command finishes, refresh the browser page to complete sign-in.
 
-Then refresh the browser.
+---
 
-### 6. If you need the raw token only
+### macOS / Linux
 
-```bash
-sudo grep '^OPENCLAW_GATEWAY_TOKEN=' /etc/openclaw/openclaw.env
-```
-
-## Complete macOS / Linux steps
-
-### 1. Prepare your SSH key
-
-If you already have one:
-
-```bash
-cat ~/.ssh/id_ed25519.pub
-```
-
-Paste the full line into `sshPublicKey`.
-
-If you do not have a key yet, generate one and then print the public key:
-
+#### Prepare SSH keys
+If you do not have SSH keys yet, first run the following command to generate a new key pair:
 ```bash
 ssh-keygen -t ed25519 -C "openclaw-azure"
+```
+
+After that, run the following command to print the public key, then paste the full line into the Azure form:
+```bash
 cat ~/.ssh/id_ed25519.pub
 ```
 
-### 2. SSH into the VM
-
-If you use your own private key:
-
+#### SSH into the virtual machine
 ```bash
 ssh -i ~/.ssh/id_ed25519 azureuser@<vmPublicFqdn>
 ```
+*(Replace `<vmPublicFqdn>` with the domain name shown in the deployment outputs.)*
 
-If you use an Azure-generated `openclaw-key.pem` file:
-
-```bash
-chmod 600 ~/Downloads/openclaw-key.pem
-ssh -i ~/Downloads/openclaw-key.pem azureuser@<vmPublicFqdn>
-```
-
-### 3. Get the dashboard URL
-
-Run:
-
+#### Get the web dashboard URL
+After you log in successfully, run:
 ```bash
 openclaw-browser-url
 ```
+Copy the full Dashboard URL from the terminal output and open it in your browser.
 
-Copy the full printed URL into your browser.
-
-### 4. If the UI says pairing is required
-
+#### Authorize browser pairing
+If the browser page asks for pairing approval, run:
 ```bash
 openclaw-approve-browser
 ```
+Then return to the browser and refresh the page to start using OpenClaw.
 
-Then refresh the browser.
+## Advanced: Deploy with Azure CLI (Alternative)
 
-### 5. If you need the raw token only
+If you prefer the command line, you can skip the web-based one-click deployment and deploy directly with Azure CLI. This is useful for automation or when using a browser is inconvenient.
 
-```bash
-sudo grep '^OPENCLAW_GATEWAY_TOKEN=' /etc/openclaw/openclaw.env
-```
-
-## Advanced: Azure CLI Deployment (Alternative)
-
-If you are comfortable with the command line, you can skip the web-based one-click deployment and use the Azure CLI instead. This is particularly useful for automation scripts or when a browser is unavailable.
-
-### 1. Log in to Azure
+### 1. Sign in to Azure
 ```bash
 az login
 ```
 
-### 2. Create a Resource Group
-Before deploying, create a resource group in your preferred location (e.g., `southeastasia`):
+### 2. Create a resource group
+Before deployment, choose a location such as `southeastasia` and create a resource group:
 ```bash
 az group create --name rg-openclaw-sea --location southeastasia
 ```
 
-### 3. Run the Deployment
-Provide your custom parameters in the command below. The deployment may take a few minutes.
+### 3. Run the deployment command
+Fill in your custom parameters directly in the command below. Deployment may take a few minutes.
+
+If you want Azure OpenAI configured during deployment, provide `azureOpenAiEndpoint`, `azureOpenAiDeployment`, and `azureOpenAiApiKey` together. If you do not want Azure OpenAI configured yet, omit all three together.
 ```bash
 az deployment group create \
   --name openclaw-sea-20260307 \
@@ -459,80 +390,80 @@ az deployment group create \
     azureOpenAiApiKey="replace-with-api-key"
 ```
 
-### 4. View Deployment Outputs
-Once successful, the console will output a large JSON object. Look for the `outputs` section at the bottom, which contains the VM's public domain name (`vmPublicFqdn`).
-If you miss the output, you can retrieve it anytime by running:
+### 4. View deployment outputs
+After the deployment succeeds, the console prints a large JSON object. In the `outputs` section near the bottom, you can find the VM public domain name `vmPublicFqdn`.
+If you cleared the terminal, you can retrieve the deployment outputs again with:
 ```bash
 az deployment group show \
   --name openclaw-sea-20260307 \
   --resource-group rg-openclaw-sea \
   --query properties.outputs
 ```
-After obtaining the public domain name, all subsequent steps are identical to the "Connection and Initial Setup" / SSH login steps detailed above.
+After you obtain the public domain name, the remaining steps are the same as in **3. Connect and Complete Initial Setup** above.
 
-## Troubleshooting
+## FAQ
 
-### 1. SSH returns `Permission denied (publickey)`
-**Cause:** The private key you are using does not match the public key stored on the VM, or you didn't specify the correct path to your private key.  
-**Solution:**
-- Verify that the `sshPublicKey` content provided during deployment pairs with the private key on your local machine.
-- If you downloaded a `.pem` key from the Azure Portal, explicitly pass it using the `-i` flag:
+### 1. SSH reports `Permission denied (publickey)`
+**Cause:** The private key you are using does not match the public key you provided to Azure, or you did not use `-i` to point to the correct private key file.  
+**Resolution:**
+- Make sure the public key content you pasted during deployment matches the private key you are using now.
+- If you downloaded a `.pem` file from Azure portal, specify it explicitly when connecting:
   ```bash
-  ssh -i </path/to/your-key.pem> azureuser@<vmPublicFqdn>
+  ssh -i <path-to-your-private-key.pem> azureuser@<vmPublicFqdn>
   ```
 
-### 2. SSH returns `UNPROTECTED PRIVATE KEY FILE` or `Permissions 0644 for ... are too open`
-**Cause:** Security mechanisms prevent SSH clients from using private key files with overly broad permissions (e.g., readable by other users).  
-**Solution:**  
-- **For Windows:** Run these commands in PowerShell (assuming your key is `openclaw-key.pem`):
+### 2. SSH reports `UNPROTECTED PRIVATE KEY FILE` or `Permissions 0644 for ... are too open`
+**Cause:** Your private key file permissions are too broad, so the SSH client refuses to use it for security reasons.  
+**Resolution:**
+- **Windows:** Run the following commands in PowerShell, assuming the private key file is named `openclaw-key.pem`:
   ```powershell
   $Key = "$env:USERPROFILE\.ssh\openclaw-key.pem"
   icacls $Key /inheritance:r
   icacls $Key /remove:g "Users" "Authenticated Users" "Everyone" "BUILTIN\Administrators"
   icacls $Key /grant:r "${env:USERNAME}:R"
   ```
-- **For macOS/Linux:** Restrict permissions directly in the terminal:
+- **Mac / Linux:** Restrict permissions in the terminal:
   ```bash
   chmod 600 ~/.ssh/openclaw-key.pem
   ```
 
-### 3. Missing `gateway token` or denied access to the web dashboard
-**Cause:** OpenClaw secures its console via a hashed token in the URL anchor. Attempting to navigate strictly to the bare domain will block you.  
-**Solution:**  
-Never attempt to guess the token or bypass it. From your VM's SSH terminal, execute:
+### 3. How do I handle a missing `gateway token` prompt?
+**Cause:** OpenClaw uses token-based authentication for the dashboard. Accessing only the bare domain name is rejected.  
+**Resolution:**
+Do not guess or type the token manually. SSH into the virtual machine and run:
 ```bash
 openclaw-browser-url
 ```
-Copy and paste the entire output starting with `https://` (which includes `#token=...`) into your browser.
+The command prints the complete `https://.../#token=...` URL. Copy the full URL, including the token, into your browser.
 
-### 4. UI says `pairing required`
-**Cause:** To prevent unauthorized entities from connecting to your OpenClaw node, new browser clients must be approved by an administrator connection (SSH).  
-**Solution:**  
-Keep the “pairing required” browser tab open. Return to your SSH terminal on the VM and execute:
+### 4. The browser shows `pairing required`
+**Cause:** For security reasons, a browser connecting as a new client to the gateway must be approved by an administrator.  
+**Resolution:**
+Keep the browser page open, switch back to the SSH terminal on the virtual machine, and run:
 ```bash
 openclaw-approve-browser
 ```
-Once it succeeds, switch back to the browser and refresh the page.
+After the command finishes, refresh the browser page to enter the dashboard.
 
-### 5. Browser shows `502 Bad Gateway`
-**Cause:** The virtual machine has booted, but the underlying Docker containers (Gateway or Caddy proxy) have not finished initializing, or encountered an error (e.g., invalid Azure OpenAI credentials causing crash loop).  
-**Solution:**  
-1. Wait 1-2 minutes and refresh the page. 
-2. If it persists, SSH into the VM and diagnose the container states:
+### 5. The browser shows `502 Bad Gateway`
+**Cause:** Deployment may not be fully finished yet, or the internal Docker containers, Gateway or Caddy, may have failed to start or may still be restarting.  
+**Resolution:**
+1. If deployment just finished, wait 1 to 2 minutes and let all components start completely.
+2. If the issue persists, SSH into the virtual machine and inspect the container status:
    ```bash
-   # Check container status
+   # Check which containers are not in the running state
    sudo docker ps -a
-   
-   # Inspect gateway crashes (e.g., failed to connect to LLM)
+
+   # If the gateway keeps restarting, inspect the error logs
    sudo docker logs --tail 100 openclaw-gateway
-   
-   # Inspect proxy logs
+
+   # Inspect reverse proxy logs
    sudo docker logs --tail 100 openclaw-caddy
    ```
 
-### 6. SSH or Browser Connection Timed Out
-**Cause:** The public IP hasn't been properly assigned by Azure, or network traffic is blocked by a Network Security Group (NSG).  
-**Solution:**  
-- Open your target VM in the Azure Portal.
-- Ensure the state shows `Running` and it has a valid `Public IP address`.
-- Go to the **Networking** blade in the left menu, and ensure the *Inbound port rules* allow traffic on ports `22` (SSH) and `443` (HTTPS) from your current IP.
+### 6. I cannot connect to the virtual machine (`Connection Timed Out`)
+**Cause:** The virtual machine may not have received a public IP successfully, or ports 22 and 443 may be blocked by the Network Security Group (NSG).  
+**Resolution:**
+- In Azure portal, open the **Virtual Machine** page for the deployment you just created.
+- Confirm it is in the `Running` state and that it has a Public IP assigned.
+- Open **Networking** on the left and make sure the inbound port rules allow `22` (SSH) and `443` (HTTPS).
