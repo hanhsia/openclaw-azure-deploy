@@ -48,7 +48,7 @@ Use the button below to easily deploy OpenClaw to your Azure environment.
 
 ## 3. 连接与初始化配置
 
-根据您的操作系统，按照以下步骤登录虚拟机并获取访问令牌。
+根据您的操作系统，按照以下步骤登录虚拟机并获取访问令牌。登录成功后，您可以直接在虚拟机上使用 `openclaw` 命令，例如 `openclaw status`。
 
 ### Windows 用户操作步骤
 
@@ -71,7 +71,7 @@ ssh -i "$env:USERPROFILE\.ssh\id_ed25519" azureuser@<vmPublicFqdn>
 *(请将 `<vmPublicFqdn>` 替换为您在部署输出中记录的域名，如有其他私钥名称或位置请相应调整)*
 
 #### 获取 Web 控制台地址
-登录成功后在终端执行：
+登录成功后，在已经 SSH 进入 Azure 虚拟机的远程终端中执行：
 ```bash
 openclaw-browser-url
 ```
@@ -110,7 +110,7 @@ ssh -i ~/.ssh/id_ed25519 azureuser@<vmPublicFqdn>
 *(请将 `<vmPublicFqdn>` 替换为您在部署输出中记录的域名)*
 
 #### 获取 Web 控制台地址
-登录成功后在终端执行：
+登录成功后，在已经 SSH 进入 Azure 虚拟机的远程终端中执行：
 ```bash
 openclaw-browser-url
 ```
@@ -210,7 +210,7 @@ az deployment group show \
 ### 4. 如何找到 `gateway token`（网关令牌）缺少的提示？
 **原因：** OpenClaw 面板采用了基于 Token 的安全验证，不允许直接通过裸域名访问，直接输入 URL 时会被拒绝。  
 **解决办法：**  
-切勿手动猜测或输入 Token。请 SSH 登录进虚拟机，直接运行：
+切勿手动猜测或输入 Token。请 SSH 登录进虚拟机，在远程终端中直接运行：
 ```bash
 openclaw-browser-url
 ```
@@ -225,23 +225,23 @@ openclaw-approve-browser
 ```
 命令执行完毕后，回到浏览器刷新页面即可直接进入面板。
 
-### 6. 浏览器访问报错 `502 Bad Gateway`
-**原因：** 部署尚未完全结束，或者内部的 Docker 容器服务（Gateway 或 Caddy）未成功启动或正在重启中。  
+### 5. 浏览器访问报错 `502 Bad Gateway`
+**原因：** 部署尚未完全结束，或者宿主机上的 OpenClaw Gateway / Caddy 服务未成功启动，或正在重启中。  
 **解决办法：**  
 1. 刚刚部署完毕时，请等待 1-2 分钟让组件完全启动。
-2. 如果持续报错，请登录至虚拟机排查容器状态：
+2. 如果持续报错，请登录至虚拟机排查服务状态：
    ```bash
-   # 查看哪些容器不在 running 状态
-   sudo docker ps -a
-   
-   # 如果 gateway 服务一直重启，可以查看具体错误日志（如 API Key 是否填错导致连接大模型失败）
-   sudo docker logs --tail 100 openclaw-gateway
-   
-   # 查看反向代理层的日志
-   sudo docker logs --tail 100 openclaw-caddy
+  # 查看 OpenClaw 和 Caddy 服务状态
+  sudo systemctl status openclaw-gateway caddy --no-pager
+
+  # 查看 OpenClaw Gateway 的最近日志
+  sudo journalctl -u openclaw-gateway -n 100 --no-pager
+
+  # 查看 Caddy 的最近日志
+  sudo journalctl -u caddy -n 100 --no-pager
    ```
 
-### 7. 无法连接虚拟机（Connection Timed Out）
+### 6. 无法连接虚拟机（Connection Timed Out）
 **原因：** 虚拟机实例没有成功获取公网 IP，或者其 22 / 443 端口被安全组（NSG）阻挡。  
 **解决办法：**  
 - 在 Azure 门户中前往您刚刚部署的**虚拟机**页面。
@@ -292,7 +292,7 @@ If you do not have an SSH key pair yet, you can generate one by following the op
 
 ## 3. Connect and Complete Initial Setup
 
-Depending on your operating system, follow the steps below to log in to the virtual machine and obtain the access token.
+Depending on your operating system, follow the steps below to log in to the virtual machine and obtain the access token. After you sign in, you can use the `openclaw` command directly on the VM, for example `openclaw status`.
 
 ### Windows
 
@@ -315,7 +315,7 @@ ssh -i "$env:USERPROFILE\.ssh\id_ed25519" azureuser@<vmPublicFqdn>
 *(Replace `<vmPublicFqdn>` with the domain name shown in the deployment outputs. Adjust the key path or file name if needed.)*
 
 #### Get the web dashboard URL
-After you log in successfully, run:
+After you log in successfully, run this in the remote shell on the Azure virtual machine, not in your local repo terminal:
 ```bash
 openclaw-browser-url
 ```
@@ -354,7 +354,7 @@ ssh -i ~/.ssh/id_ed25519 azureuser@<vmPublicFqdn>
 *(Replace `<vmPublicFqdn>` with the domain name shown in the deployment outputs.)*
 
 #### Get the web dashboard URL
-After you log in successfully, run:
+After you log in successfully, run this in the remote shell on the Azure virtual machine, not in your local repo terminal:
 ```bash
 openclaw-browser-url
 ```
@@ -452,7 +452,7 @@ After you obtain the public domain name, the remaining steps are the same as in 
 ### 4. How do I handle a missing `gateway token` prompt?
 **Cause:** OpenClaw uses token-based authentication for the dashboard. Accessing only the bare domain name is rejected.  
 **Resolution:**
-Do not guess or type the token manually. SSH into the virtual machine and run:
+Do not guess or type the token manually. SSH into the virtual machine and run this in the remote shell:
 ```bash
 openclaw-browser-url
 ```
@@ -467,23 +467,23 @@ openclaw-approve-browser
 ```
 After the command finishes, refresh the browser page to enter the dashboard.
 
-### 6. The browser shows `502 Bad Gateway`
-**Cause:** Deployment may not be fully finished yet, or the internal Docker containers, Gateway or Caddy, may have failed to start or may still be restarting.  
+### 5. The browser shows `502 Bad Gateway`
+**Cause:** Deployment may not be fully finished yet, or the host-level OpenClaw Gateway or Caddy service may have failed to start or may still be restarting.  
 **Resolution:**
 1. If deployment just finished, wait 1 to 2 minutes and let all components start completely.
-2. If the issue persists, SSH into the virtual machine and inspect the container status:
+2. If the issue persists, SSH into the virtual machine and inspect the service status:
    ```bash
-   # Check which containers are not in the running state
-   sudo docker ps -a
+  # Check the OpenClaw and Caddy service status
+  sudo systemctl status openclaw-gateway caddy --no-pager
 
-   # If the gateway keeps restarting, inspect the error logs
-   sudo docker logs --tail 100 openclaw-gateway
+  # Inspect recent OpenClaw Gateway logs
+  sudo journalctl -u openclaw-gateway -n 100 --no-pager
 
-   # Inspect reverse proxy logs
-   sudo docker logs --tail 100 openclaw-caddy
+  # Inspect recent Caddy logs
+  sudo journalctl -u caddy -n 100 --no-pager
    ```
 
-### 7. I cannot connect to the virtual machine (`Connection Timed Out`)
+### 6. I cannot connect to the virtual machine (`Connection Timed Out`)
 **Cause:** The virtual machine may not have received a public IP successfully, or ports 22 and 443 may be blocked by the Network Security Group (NSG).  
 **Resolution:**
 - In Azure portal, open the **Virtual Machine** page for the deployment you just created.
