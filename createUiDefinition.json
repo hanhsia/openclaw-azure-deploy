@@ -127,6 +127,9 @@
             "type": "Microsoft.Common.PasswordBox",
             "label": "API Key",
             "toolTip": "Optional API key for the Azure OpenAI resource.",
+            "options": {
+              "hideConfirmation": true
+            },
             "constraints": {
               "required": false
             }
@@ -152,6 +155,9 @@
             "type": "Microsoft.Common.PasswordBox",
             "label": "Feishu App Secret",
             "toolTip": "Optional Feishu App Secret for WebSocket bot integration.",
+            "options": {
+              "hideConfirmation": true
+            },
             "constraints": {
               "required": false
             }

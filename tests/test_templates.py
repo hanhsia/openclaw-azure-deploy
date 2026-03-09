@@ -173,6 +173,21 @@ class AzureDeployTemplateTests(unittest.TestCase):
         self.assertIn("feishuAppId", element_names)
         self.assertIn("feishuAppSecret", element_names)
 
+        openai_step = next(step for step in steps if step["name"] == "openai")
+        openai_api_key = next(
+            element
+            for element in openai_step["elements"]
+            if element["name"] == "azureOpenAiApiKey"
+        )
+        self.assertTrue(openai_api_key["options"]["hideConfirmation"])
+
+        feishu_secret = next(
+            element
+            for element in feishu_step["elements"]
+            if element["name"] == "feishuAppSecret"
+        )
+        self.assertTrue(feishu_secret["options"]["hideConfirmation"])
+
         outputs = self.ui_definition["parameters"]["outputs"]
         self.assertEqual(outputs["vmName"], "[basics('vmName')]")
         self.assertEqual(
