@@ -1,3 +1,6 @@
 caddyConfig.template.txt
 bootstrapScript.template.sh
 openclawConfig.template.json
+.env
+tests/__pycache__/
+*.pyc

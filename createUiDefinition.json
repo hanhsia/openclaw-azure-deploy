@@ -1,0 +1,176 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/0.1.2-preview/CreateUIDefinition.MultiVm.json#",
+  "handler": "Microsoft.Azure.CreateUIDef",
+  "version": "0.1.2-preview",
+  "parameters": {
+    "config": {
+      "isWizard": true,
+      "basics": {
+        "description": "Deploy OpenClaw to Azure with an optional Azure OpenAI configuration and a dedicated Feishu step.",
+        "location": {
+          "resourceTypes": [
+            "Microsoft.Compute/virtualMachines",
+            "Microsoft.Compute/disks",
+            "Microsoft.Network/publicIPAddresses"
+          ],
+          "visible": true
+        }
+      }
+    },
+    "basics": [
+      {
+        "name": "vmName",
+        "type": "Microsoft.Common.TextBox",
+        "label": "VM Name",
+        "toolTip": "Name of the OpenClaw VM.",
+        "defaultValue": "openclaw-vm",
+        "constraints": {
+          "required": true,
+          "validations": [
+            {
+              "regex": "^[a-zA-Z0-9][a-zA-Z0-9-]{2,63}$",
+              "message": "Use 3-64 characters consisting of letters, numbers, or hyphens."
+            }
+          ]
+        }
+      },
+      {
+        "name": "adminUsername",
+        "type": "Microsoft.Common.TextBox",
+        "label": "Admin Username",
+        "toolTip": "Linux administrator username for SSH access.",
+        "defaultValue": "azureuser",
+        "constraints": {
+          "required": true
+        }
+      },
+      {
+        "name": "sshPublicKey",
+        "type": "Microsoft.Common.TextBox",
+        "label": "SSH Public Key",
+        "toolTip": "Paste the SSH public key content, not the private key.",
+        "multiLine": true,
+        "constraints": {
+          "required": true,
+          "validations": [
+            {
+              "regex": "^(ssh-(rsa|ed25519)|ecdsa-sha2-nistp(256|384|521))\\s+.+$",
+              "message": "Enter a valid SSH public key."
+            }
+          ]
+        }
+      },
+      {
+        "name": "vmSize",
+        "type": "Microsoft.Common.TextBox",
+        "label": "VM Size",
+        "toolTip": "VM size for the personal deployment.",
+        "defaultValue": "Standard_B2as_v2",
+        "constraints": {
+          "required": true
+        }
+      },
+      {
+        "name": "dataDiskSizeGb",
+        "type": "Microsoft.Common.TextBox",
+        "label": "Data Disk Size (GiB)",
+        "toolTip": "Managed data disk size in GiB for /data.",
+        "defaultValue": "32",
+        "constraints": {
+          "required": true,
+          "validations": [
+            {
+              "regex": "^([3-9][2-9]|[1-9][0-9]{2}|10[0-1][0-9]|102[0-4])$",
+              "message": "Enter a value from 32 to 1024."
+            }
+          ]
+        }
+      },
+      {
+        "name": "hostname",
+        "type": "Microsoft.Common.TextBox",
+        "label": "Custom Hostname",
+        "toolTip": "Optional. Leave empty to use the Azure-generated public DNS name.",
+        "defaultValue": "",
+        "constraints": {
+          "required": false
+        }
+      }
+    ],
+    "steps": [
+      {
+        "name": "openai",
+        "label": "Azure OpenAI",
+        "elements": [
+          {
+            "name": "azureOpenAiEndpoint",
+            "type": "Microsoft.Common.TextBox",
+            "label": "Endpoint",
+            "toolTip": "Optional. Fill in all three Azure OpenAI fields together, or leave all three empty.",
+            "defaultValue": "",
+            "constraints": {
+              "required": false
+            }
+          },
+          {
+            "name": "azureOpenAiDeployment",
+            "type": "Microsoft.Common.TextBox",
+            "label": "Deployment Name",
+            "toolTip": "Optional Azure OpenAI deployment name used by OpenClaw as the primary model ref.",
+            "defaultValue": "",
+            "constraints": {
+              "required": false
+            }
+          },
+          {
+            "name": "azureOpenAiApiKey",
+            "type": "Microsoft.Common.PasswordBox",
+            "label": "API Key",
+            "toolTip": "Optional API key for the Azure OpenAI resource.",
+            "constraints": {
+              "required": false
+            }
+          }
+        ]
+      },
+      {
+        "name": "feishu",
+        "label": "Feishu",
+        "elements": [
+          {
+            "name": "feishuAppId",
+            "type": "Microsoft.Common.TextBox",
+            "label": "Feishu App ID",
+            "toolTip": "Optional. Fill in both Feishu fields together, or leave both empty.",
+            "defaultValue": "",
+            "constraints": {
+              "required": false
+            }
+          },
+          {
+            "name": "feishuAppSecret",
+            "type": "Microsoft.Common.PasswordBox",
+            "label": "Feishu App Secret",
+            "toolTip": "Optional Feishu App Secret for WebSocket bot integration.",
+            "constraints": {
+              "required": false
+            }
+          }
+        ]
+      }
+    ],
+    "outputs": {
+      "vmName": "[basics('vmName')]",
+      "adminUsername": "[basics('adminUsername')]",
+      "sshPublicKey": "[basics('sshPublicKey')]",
+      "vmSize": "[basics('vmSize')]",
+      "dataDiskSizeGb": "[int(basics('dataDiskSizeGb'))]",
+      "hostname": "[basics('hostname')]",
+      "azureOpenAiEndpoint": "[steps('openai').azureOpenAiEndpoint]",
+      "azureOpenAiDeployment": "[steps('openai').azureOpenAiDeployment]",
+      "azureOpenAiApiKey": "[steps('openai').azureOpenAiApiKey.password]",
+      "feishuAppId": "[steps('feishu').feishuAppId]",
+      "feishuAppSecret": "[steps('feishu').feishuAppSecret.password]"
+    }
+  }
+}

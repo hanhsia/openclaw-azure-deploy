@@ -29,6 +29,13 @@ Azure 中国区用户 / Azure China users:
 
 这三个 Azure OpenAI 参数要么全部填写，要么全部留空。
 
+如果您希望部署完成后立即接入飞书（WebSocket 长连接模式），还需要额外准备以下信息：
+
+- **Feishu App ID**：飞书开放平台中应用的 App ID，例如 `cli_xxx`
+- **Feishu App Secret**：飞书开放平台中应用的 App Secret
+
+这两个飞书参数要么全部填写，要么全部留空。
+
 如果你还没有 SSH 密钥对，可以参考下方操作系统的具体说明进行生成。
 
 ## 2. 一键部署流程
@@ -44,7 +51,10 @@ Azure 中国区用户 / Azure China users:
   - `azureOpenAiEndpoint`：可选，您的 Azure OpenAI 终结点
   - `azureOpenAiDeployment`：可选，您的模型部署名称
   - `azureOpenAiApiKey`：可选，您的 Azure OpenAI API 密钥
+  - `feishuAppId`：可选，飞书应用的 App ID
+  - `feishuAppSecret`：可选，飞书应用的 App Secret
   - 上述三个 Azure OpenAI 参数要么全部填写，要么全部留空
+  - 上述两个飞书参数要么全部填写，要么全部留空
 5. 点击**查看 + 创建**，然后点击**创建**提交部署。
 6. 等待部署完成。请耐心等待，直到所有资源（特别是扩展 `openclaw-bootstrap`）显示部署成功。
 7. 部署完成后，点击左侧的**输出 (Outputs)**，记录以下重要信息：
@@ -180,6 +190,25 @@ az deployment group show \
 ```
 拿到公网域名后，后续的步骤与上述的【3. 连接与初始化配置】完全相同。
 
+## 飞书配置（Azure China）
+
+如果您在部署表单中填写了 `feishuAppId` 和 `feishuAppSecret`，模板会自动把飞书通道写入 OpenClaw 配置，并启用 WebSocket 长连接模式，无需暴露公网 webhook。
+
+飞书开放平台还需要完成以下设置：
+
+1. 创建企业自建应用，并获取 App ID / App Secret。
+2. 开启机器人能力。
+3. 为应用添加至少以下事件订阅：`im.message.receive_v1`。
+4. 在“事件订阅”中选择“使用长连接接收事件（WebSocket）”。
+5. 确保应用已经发布到可用版本。
+
+部署完成后，可在虚拟机中检查：
+
+```bash
+openclaw gateway status
+sudo cat /data/openclaw.json
+```
+
 ## 常见问题
 
 ### 1. SSH 报错 `Permission denied (publickey)`
@@ -279,6 +308,13 @@ If you want Azure OpenAI configured during deployment, also prepare the followin
 
 These three Azure OpenAI parameters must either all be provided or all be left empty.
 
+If you want Feishu connected during deployment with the WebSocket long-connection mode, also prepare the following:
+
+- **Feishu App ID**: the Feishu app App ID, for example `cli_xxx`
+- **Feishu App Secret**: the Feishu app App Secret
+
+These two Feishu parameters must either both be provided or both be left empty.
+
 If you do not have an SSH key pair yet, you can generate one by following the operating-system-specific instructions below.
 
 ## 2. One-Click Deployment Workflow
@@ -294,7 +330,10 @@ If you do not have an SSH key pair yet, you can generate one by following the op
    - `azureOpenAiEndpoint`: optional, your Azure OpenAI endpoint
    - `azureOpenAiDeployment`: optional, your Azure OpenAI deployment name
    - `azureOpenAiApiKey`: optional, your Azure OpenAI API key
+  - `feishuAppId`: optional, your Feishu app App ID
+  - `feishuAppSecret`: optional, your Feishu app App Secret
    - The three Azure OpenAI parameters above must either all be provided or all be left empty
+  - The two Feishu parameters above must either both be provided or both be left empty
 5. Click **Review + create**, then click **Create** to submit the deployment.
 6. Wait for deployment to finish. In particular, wait until all resources, especially the `openclaw-bootstrap` extension, show as successfully deployed.
 7. After deployment finishes, open **Outputs** on the left and record the following:
@@ -427,6 +466,25 @@ az deployment group show \
   --query properties.outputs
 ```
 After you obtain the public domain name, the remaining steps are the same as in **3. Connect and Complete Initial Setup** above.
+
+## Feishu Setup (Azure China)
+
+If you provide `feishuAppId` and `feishuAppSecret` in the deployment form, the template writes the Feishu channel configuration into OpenClaw automatically and uses the WebSocket long-connection mode, so no public webhook is required.
+
+You still need to complete the Feishu-side setup:
+
+1. Create a self-built enterprise app and copy the App ID and App Secret.
+2. Enable the bot capability.
+3. Add at least the `im.message.receive_v1` event subscription.
+4. In Event Subscription, choose the WebSocket long-connection mode.
+5. Publish the app version.
+
+After deployment, you can verify the channel on the VM:
+
+```bash
+openclaw gateway status
+sudo cat /data/openclaw.json
+```
 
 ## FAQ
 
