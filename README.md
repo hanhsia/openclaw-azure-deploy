@@ -3,6 +3,7 @@
 [中文](#zh-cn) | [English](#en)
 
 Use the button below to easily deploy OpenClaw to your Azure environment.
+
 Azure 全球用户 / Azure Global users:
 [![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fhanhsia%2Fopenclaw-azure-deploy%2Fmain%2Fazuredeploy.json/createUIDefinitionUri/https%3A%2F%2Fraw.githubusercontent.com%2Fhanhsia%2Fopenclaw-azure-deploy%2Fmain%2FcreateUiDefinition.json)
 
