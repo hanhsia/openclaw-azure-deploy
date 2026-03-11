@@ -5,3 +5,10 @@ openclawConfig.template.json
 tests/__pycache__/
 *.pyc
 .github/copilot-instructions.md
+openclaw/
+openclaw-approve-browser.template.sh
+openclaw-approve-teams-pairing.template.sh
+openclaw-browser-url.template.sh
+teams-app-package/test-output/
+.env.example
+.playwright-mcp/

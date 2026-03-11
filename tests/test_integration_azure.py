@@ -3,15 +3,20 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import unittest
 import uuid
 from pathlib import Path
+from urllib.parse import urlparse
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 TEMPLATE_FILE = REPO_ROOT / "azuredeploy.json"
+TEAMS_APP_PACKAGE_SCRIPT = REPO_ROOT / "teams-app-package" / "build-app-package.ps1"
+TEAMS_APP_PACKAGE_OUTPUT_DIR = REPO_ROOT / "teams-app-package" / "test-output"
+DEPLOYMENT_METADATA_FILENAME = "deployment.json"
 
 GLOBAL_CLOUD = "AzureCloud"
 GLOBAL_LOCATION = "eastasia"
@@ -28,6 +33,13 @@ SENSITIVE_PARAMETER_KEYS = {
     "sshPublicKey",
 }
 AZ_EXECUTABLE = shutil.which("az.cmd") or shutil.which("az") or "az"
+POWERSHELL_EXECUTABLE = (
+    shutil.which("pwsh.exe")
+    or shutil.which("pwsh")
+    or shutil.which("powershell.exe")
+    or shutil.which("powershell")
+    or "pwsh"
+)
 
 
 def log_message(cloud_name, message):
@@ -133,6 +145,92 @@ class AzureIntegrationDeploymentTests(unittest.TestCase):
     def _log(self, cloud_name, message):
         log_message(cloud_name, message)
 
+    def _keep_resource_group(self):
+        return self.env.get("TEST_KEEP_RESOURCE_GROUP", "0").strip() == "1"
+
+    def _write_deployment_metadata(self, cloud_name, metadata):
+        persistent_output_dir = TEAMS_APP_PACKAGE_OUTPUT_DIR / cloud_name
+        persistent_output_dir.mkdir(parents=True, exist_ok=True)
+        metadata_path = persistent_output_dir / DEPLOYMENT_METADATA_FILENAME
+        metadata_path.write_text(
+            json.dumps(metadata, indent=2, ensure_ascii=True) + "\n",
+            encoding="utf-8",
+        )
+        self._log(cloud_name, f"Wrote deployment metadata: {metadata_path}")
+        return metadata_path
+
+    def _generate_teams_app_package(self, cloud_name, openclaw_public_url):
+        bot_domain = urlparse(openclaw_public_url).hostname
+        self.assertTrue(
+            bot_domain, f"Could not derive hostname from {openclaw_public_url}"
+        )
+
+        persistent_output_dir = TEAMS_APP_PACKAGE_OUTPUT_DIR / cloud_name
+        if persistent_output_dir.exists():
+            shutil.rmtree(persistent_output_dir)
+        persistent_output_dir.mkdir(parents=True, exist_ok=True)
+
+        with tempfile.TemporaryDirectory(prefix="openclaw-teams-app-") as temp_dir:
+            package_command = [
+                POWERSHELL_EXECUTABLE,
+                "-NoLogo",
+                "-NoProfile",
+                "-File",
+                str(TEAMS_APP_PACKAGE_SCRIPT),
+                "-TemplateName",
+                "import-test",
+                "-AppId",
+                self.env["TEST_MSTEAMS_APP_ID"],
+                "-BotDomain",
+                bot_domain,
+                "-OutputDir",
+                temp_dir,
+            ]
+            self._log(
+                cloud_name,
+                f"Generating Teams app package from deployment output using host {bot_domain}",
+            )
+            result = subprocess.run(
+                package_command,
+                cwd=REPO_ROOT,
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+
+            zip_path = Path(temp_dir) / "OpenClaw.zip"
+            manifest_path = Path(temp_dir) / "OpenClaw" / "manifest.json"
+            self.assertTrue(
+                zip_path.exists(), f"Expected generated package at {zip_path}"
+            )
+            self.assertTrue(
+                manifest_path.exists(),
+                f"Expected generated manifest at {manifest_path}",
+            )
+
+            persistent_zip_path = persistent_output_dir / "OpenClaw.zip"
+            persistent_manifest_dir = persistent_output_dir / "OpenClaw"
+            shutil.copy2(zip_path, persistent_zip_path)
+            shutil.copytree(
+                manifest_path.parent, persistent_manifest_dir, dirs_exist_ok=True
+            )
+
+            self._log(
+                cloud_name,
+                f"Teams app package generated successfully: {persistent_zip_path}",
+            )
+            self._log(
+                cloud_name,
+                f"Generated Teams manifest directory: {persistent_manifest_dir}",
+            )
+            if result.stdout.strip():
+                self._log(cloud_name, result.stdout.strip())
+            return {
+                "zipPath": str(persistent_zip_path),
+                "manifestDirectory": str(persistent_manifest_dir),
+                "botDomain": bot_domain,
+            }
+
     def _wait_for_resource_group_deletion(self, cloud_name, resource_group_name):
         deadline = time.time() + DELETE_WAIT_TIMEOUT_SECONDS
         while True:
@@ -187,6 +285,13 @@ class AzureIntegrationDeploymentTests(unittest.TestCase):
         resource_group_name = f"{resource_group_prefix}-{cloud_name.lower()}-{suffix}"
         vm_name = f"openclaw{suffix}"
         rg_created = False
+        deployment_metadata = {
+            "cloud": cloud_name,
+            "location": location,
+            "resourceGroup": resource_group_name,
+            "vmName": vm_name,
+            "keptResourceGroup": self._keep_resource_group(),
+        }
 
         parameters = [
             f"vmName={vm_name}",
@@ -283,6 +388,13 @@ class AzureIntegrationDeploymentTests(unittest.TestCase):
             outputs = payload["properties"]["outputs"]
             vm_public_fqdn = outputs["vmPublicFqdn"]["value"]
             openclaw_public_url = outputs["openclawPublicUrl"]["value"]
+            deployment_metadata.update(
+                {
+                    "vmPublicFqdn": vm_public_fqdn,
+                    "openclawPublicUrl": openclaw_public_url,
+                    "deploymentName": deployment_name,
+                }
+            )
             self._log(
                 cloud_name,
                 f"Validating outputs for {vm_public_fqdn} and {openclaw_public_url}",
@@ -299,6 +411,7 @@ class AzureIntegrationDeploymentTests(unittest.TestCase):
 
             if cloud_name == GLOBAL_CLOUD and self.env.get("TEST_MSTEAMS_APP_ID"):
                 bot_name = f"{vm_name}-bot"
+                deployment_metadata["teamsBotName"] = bot_name
                 self._log(cloud_name, f"Checking Teams bot resource {bot_name}")
                 bot_show = json.loads(
                     run_az(
@@ -319,10 +432,25 @@ class AzureIntegrationDeploymentTests(unittest.TestCase):
                 )
                 self.assertEqual(bot_show["name"], bot_name)
                 self._log(cloud_name, f"Teams bot resource {bot_name} verified")
+                deployment_metadata["teamsBotResourceId"] = bot_show.get("id", "")
+                deployment_metadata["teamsBotEndpoint"] = bot_show.get(
+                    "properties", {}
+                ).get("endpoint", "")
+                deployment_metadata["teamsAppPackage"] = (
+                    self._generate_teams_app_package(cloud_name, openclaw_public_url)
+                )
+
+            self._write_deployment_metadata(cloud_name, deployment_metadata)
 
             self._log(cloud_name, "Deployment validation finished")
         finally:
             if rg_created:
+                if self._keep_resource_group():
+                    self._log(
+                        cloud_name,
+                        f"Keeping resource group {resource_group_name} because TEST_KEEP_RESOURCE_GROUP=1",
+                    )
+                    return
                 self._log(cloud_name, f"Deleting resource group {resource_group_name}")
                 ensure_cloud(cloud_name)
                 run_az(

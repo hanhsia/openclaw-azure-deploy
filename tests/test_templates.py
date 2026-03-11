@@ -59,6 +59,16 @@ class AzureDeployTemplateTests(unittest.TestCase):
         cls.bootstrap_script = (REPO_ROOT / "bootstrapScript.template.sh").read_text(
             encoding="utf-8"
         )
+        cls.teams_manifest_template = (
+            REPO_ROOT / "teams-app-package" / "manifest.template.json"
+        ).read_text(encoding="utf-8")
+        cls.teams_quickstart_manifest_template = (
+            REPO_ROOT / "teams-app-package" / "manifest.quickstart.template.json"
+        ).read_text(encoding="utf-8")
+        cls.teams_import_test_manifest_template = (
+            REPO_ROOT / "teams-app-package" / "manifest.import-test.template.json"
+        ).read_text(encoding="utf-8")
+        cls.env_example = (REPO_ROOT / ".env.example").read_text(encoding="utf-8")
         cls.readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
 
     def test_template_json_is_valid(self):
@@ -174,6 +184,13 @@ class AzureDeployTemplateTests(unittest.TestCase):
             channels["feishu"]["accounts"]["main"]["appSecret"], "${FEISHU_APP_SECRET}"
         )
 
+    def test_channel_fragments_do_not_duplicate_channels_wrapper(self):
+        variables = self.template["variables"]
+        self.assertNotIn('  "channels": {', variables["openclawFeishuJson"])
+        self.assertNotIn('  "channels": {', variables["openclawMsTeamsJson"])
+        self.assertIn('    "feishu": {', variables["openclawFeishuJson"])
+        self.assertIn('    "msteams": {', variables["openclawMsTeamsJson"])
+
     def test_bootstrap_script_exports_feishu_credentials(self):
         self.assertIn("FEISHU_APP_ID={6}", self.bootstrap_script)
         self.assertIn("FEISHU_APP_SECRET={7}", self.bootstrap_script)
@@ -181,9 +198,12 @@ class AzureDeployTemplateTests(unittest.TestCase):
         self.assertIn('FEISHU_APP_SECRET="$FEISHU_APP_SECRET"', self.bootstrap_script)
 
     def test_bootstrap_script_exports_msteams_credentials_and_installs_plugin(self):
+        arm_bootstrap_script = self.template["variables"]["bootstrapScript"]
+
         self.assertIn("MSTEAMS_APP_ID={8}", self.bootstrap_script)
         self.assertIn("MSTEAMS_APP_PASSWORD={9}", self.bootstrap_script)
         self.assertIn("MSTEAMS_TENANT_ID={10}", self.bootstrap_script)
+        self.assertIn("openclaw-approve-teams-pairing", self.bootstrap_script)
         self.assertIn(
             'git config --global --add url."https://github.com/".insteadOf ssh://git@github.com/',
             self.bootstrap_script,
@@ -204,9 +224,71 @@ class AzureDeployTemplateTests(unittest.TestCase):
         self.assertIn(
             'MSTEAMS_APP_PASSWORD="$MSTEAMS_APP_PASSWORD"', self.bootstrap_script
         )
+        self.assertIn("openclaw pairing list msteams --json", self.bootstrap_script)
+        self.assertIn(
+            "text = sys.stdin.read(); start = text.find(chr(123))",
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            'openclaw pairing approve msteams "$code" --notify',
+            self.bootstrap_script,
+        )
+        self.assertIn("sudo bash -lc '", self.bootstrap_script)
+        self.assertNotIn("python3 -c '", self.bootstrap_script)
+        self.assertIn("sudo bash -lc", arm_bootstrap_script)
+        self.assertIn(
+            "text = sys.stdin.read(); start = text.find(chr(123))",
+            arm_bootstrap_script,
+        )
+        self.assertIn('python3 -c "import json, sys;', arm_bootstrap_script)
+        self.assertNotIn("python3 -c ''", arm_bootstrap_script)
         self.assertIn(
             "openclaw plugins install @openclaw/msteams", self.bootstrap_script
         )
+        self.assertIn(
+            "npm install --prefix /opt/openclaw/lib/node_modules/openclaw/extensions/msteams",
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            "if [ -d /opt/openclaw/lib/node_modules/openclaw/extensions/msteams ]; then",
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            "else\n    sudo -u {5} env HOME=/home/{5} OPENCLAW_HOME=/home/{5} /usr/local/bin/openclaw plugins install @openclaw/msteams",
+            self.bootstrap_script,
+        )
+
+    def test_local_teams_app_package_template_exists(self):
+        build_script = REPO_ROOT / "teams-app-package" / "build-app-package.ps1"
+        readme = REPO_ROOT / "teams-app-package" / "README.md"
+        quickstart_manifest = (
+            REPO_ROOT / "teams-app-package" / "manifest.quickstart.template.json"
+        )
+        import_test_manifest = (
+            REPO_ROOT / "teams-app-package" / "manifest.import-test.template.json"
+        )
+
+        self.assertTrue(build_script.exists())
+        self.assertTrue(readme.exists())
+        self.assertTrue(quickstart_manifest.exists())
+        self.assertTrue(import_test_manifest.exists())
+        self.assertIn("MicrosoftTeams.schema.json", self.teams_manifest_template)
+        self.assertIn('"__APP_ID__"', self.teams_manifest_template)
+        self.assertIn('"__PACKAGE_ID__"', self.teams_manifest_template)
+        self.assertIn('"validDomains"', self.teams_manifest_template)
+        self.assertIn('"OpenClaw"', self.teams_quickstart_manifest_template)
+        self.assertIn('"__APP_ID__"', self.teams_quickstart_manifest_template)
+        self.assertIn('"personal"', self.teams_import_test_manifest_template)
+        self.assertNotIn('"team"', self.teams_import_test_manifest_template)
+        self.assertNotIn('"groupChat"', self.teams_import_test_manifest_template)
+        self.assertNotIn('"authorization"', self.teams_import_test_manifest_template)
+
+    def test_env_example_contains_teams_e2e_variables(self):
+        self.assertIn("TEST_RUN_INTEGRATION=0", self.env_example)
+        self.assertIn("TEST_MSTEAMS_APP_ID=", self.env_example)
+        self.assertIn("TEST_MSTEAMS_APP_PASSWORD=", self.env_example)
+        self.assertIn("TEST_MSTEAMS_BOT_DOMAIN=", self.env_example)
+        self.assertIn("TEST_OPENCLAW_PUBLIC_URL=", self.env_example)
 
     def test_custom_ui_contains_dedicated_feishu_step(self):
         self.assertEqual(

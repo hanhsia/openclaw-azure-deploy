@@ -243,6 +243,8 @@ openclaw gateway status
 sudo cat /data/openclaw.json
 ```
 
+如果你要继续做 Teams 手工联调和验收，参考 [tests/TEAMS_TESTING.md](/c:/Users/hanxia/repos/openclaw-azure-deploy/tests/TEAMS_TESTING.md)。文档里已经包含当前已验证的最小手测闭环，以及 `openclaw-approve-teams-pairing` 无参批准的操作方式。
+
 ## 常见问题
 
 ### 1. SSH 报错 `Permission denied (publickey)`
@@ -551,6 +553,8 @@ openclaw plugins list
 openclaw gateway status
 sudo cat /data/openclaw.json
 ```
+
+If you want to continue with manual Teams validation after deployment, see [tests/TEAMS_TESTING.md](/c:/Users/hanxia/repos/openclaw-azure-deploy/tests/TEAMS_TESTING.md). It includes the currently verified minimal manual flow and the no-argument approval path for `openclaw-approve-teams-pairing`.
 
 ## FAQ
 

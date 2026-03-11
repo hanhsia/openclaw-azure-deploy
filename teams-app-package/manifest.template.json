@@ -1,0 +1,83 @@
+{
+  "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.23/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.23",
+  "version": "__APP_VERSION__",
+  "id": "__PACKAGE_ID__",
+  "name": {
+    "short": "__APP_NAME__",
+    "full": "__APP_NAME__"
+  },
+  "developer": {
+    "name": "__DEVELOPER_NAME__",
+    "websiteUrl": "__DEVELOPER_WEBSITE_URL__",
+    "privacyUrl": "__PRIVACY_URL__",
+    "termsOfUseUrl": "__TERMS_URL__"
+  },
+  "description": {
+    "short": "__SHORT_DESCRIPTION__",
+    "full": "__FULL_DESCRIPTION__"
+  },
+  "icons": {
+    "outline": "outline.png",
+    "color": "color.png"
+  },
+  "accentColor": "#2563EB",
+  "bots": [
+    {
+      "botId": "__APP_ID__",
+      "scopes": [
+        "personal",
+        "team",
+        "groupChat"
+      ],
+      "isNotificationOnly": false,
+      "supportsCalling": false,
+      "supportsVideo": false,
+      "supportsFiles": true
+    }
+  ],
+  "webApplicationInfo": {
+    "id": "__APP_ID__"
+  },
+  "authorization": {
+    "permissions": {
+      "resourceSpecific": [
+        {
+          "name": "ChannelMessage.Read.Group",
+          "type": "Application"
+        },
+        {
+          "name": "ChannelMessage.Send.Group",
+          "type": "Application"
+        },
+        {
+          "name": "Member.Read.Group",
+          "type": "Application"
+        },
+        {
+          "name": "Owner.Read.Group",
+          "type": "Application"
+        },
+        {
+          "name": "ChannelSettings.Read.Group",
+          "type": "Application"
+        },
+        {
+          "name": "TeamMember.Read.Group",
+          "type": "Application"
+        },
+        {
+          "name": "TeamSettings.Read.Group",
+          "type": "Application"
+        },
+        {
+          "name": "ChatMessage.Read.Chat",
+          "type": "Application"
+        }
+      ]
+    }
+  },
+  "validDomains": [
+    "__BOT_DOMAIN__"
+  ]
+}

@@ -1,0 +1,43 @@
+{
+  "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.23/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.23",
+  "version": "__APP_VERSION__",
+  "id": "__PACKAGE_ID__",
+  "name": {
+    "short": "OpenClaw",
+    "full": "OpenClaw"
+  },
+  "developer": {
+    "name": "OpenClaw Azure Deploy",
+    "websiteUrl": "__DEVELOPER_WEBSITE_URL__",
+    "privacyUrl": "__PRIVACY_URL__",
+    "termsOfUseUrl": "__TERMS_URL__"
+  },
+  "description": {
+    "short": "OpenClaw import test for Teams",
+    "full": "OpenClaw assistant package for Teams sideload import testing."
+  },
+  "icons": {
+    "outline": "outline.png",
+    "color": "color.png"
+  },
+  "accentColor": "#2563EB",
+  "bots": [
+    {
+      "botId": "__APP_ID__",
+      "scopes": [
+        "personal"
+      ],
+      "isNotificationOnly": false,
+      "supportsCalling": false,
+      "supportsVideo": false,
+      "supportsFiles": true
+    }
+  ],
+  "webApplicationInfo": {
+    "id": "__APP_ID__"
+  },
+  "validDomains": [
+    "__BOT_DOMAIN__"
+  ]
+}
