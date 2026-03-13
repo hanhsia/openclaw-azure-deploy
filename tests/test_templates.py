@@ -1,4 +1,5 @@
 import json
+import re
 import unittest
 from pathlib import Path
 
@@ -27,6 +28,41 @@ def load_env(relative_path: str):
 
 def load_json(relative_path: str):
     return json.loads((REPO_ROOT / relative_path).read_text(encoding="utf-8"))
+
+
+def extract_arm_format_string(expression: str) -> str:
+    prefix = "[format('"
+    suffix = ")]"
+    if not expression.startswith(prefix) or not expression.endswith(suffix):
+        raise ValueError("Expression is not an ARM format() call.")
+
+    body = expression[len("[format(") : -2]
+    if not body or body[0] != "'":
+        raise ValueError(
+            "ARM format() expression does not start with a string literal."
+        )
+
+    chars = []
+    index = 1
+    while index < len(body):
+        char = body[index]
+        if char == "'":
+            if index + 1 < len(body) and body[index + 1] == "'":
+                chars.append("'")
+                index += 2
+                continue
+
+            remainder = body[index + 1 :]
+            if not remainder.startswith(", string(variables('openclawPort')),"):
+                raise ValueError(
+                    "ARM format() string literal does not terminate before the expected argument list."
+                )
+            return "".join(chars)
+
+        chars.append(char)
+        index += 1
+
+    raise ValueError("ARM format() string literal was not terminated.")
 
 
 def expected_public_dns_suffix(cloud_name: str) -> str:
@@ -257,6 +293,18 @@ class AzureDeployTemplateTests(unittest.TestCase):
             'sudo -u {5} env HOME=/home/{5} OPENCLAW_HOME=/home/{5} OPENCLAW_STATE_DIR=/data OPENCLAW_CONFIG_PATH=/data/openclaw.json OPENCLAW_GATEWAY_TOKEN="$OPENCLAW_GATEWAY_TOKEN" OPENAI_API_KEY="$OPENAI_API_KEY" FEISHU_APP_ID="$FEISHU_APP_ID" FEISHU_APP_SECRET="$FEISHU_APP_SECRET" MSTEAMS_APP_ID="$MSTEAMS_APP_ID" MSTEAMS_APP_PASSWORD="$MSTEAMS_APP_PASSWORD" MSTEAMS_TENANT_ID="$MSTEAMS_TENANT_ID" /usr/local/bin/openclaw plugins install @openclaw/msteams',
             self.bootstrap_script,
         )
+
+    def test_bootstrap_script_arm_format_expression_is_well_formed(self):
+        arm_bootstrap_script = self.template["variables"]["bootstrapScript"]
+        format_string = extract_arm_format_string(arm_bootstrap_script)
+
+        self.assertIn("sudo bash -lc '\n", format_string)
+        self.assertIn(
+            "printf '%s' '{2}' | base64 -d > /data/openclaw.json", format_string
+        )
+
+        for match in re.finditer(r"\{([^{}]+)\}", format_string):
+            self.assertRegex(match.group(1), r"^\d+$")
 
     def test_readme_documents_global_npm_update_path(self):
         self.assertIn("系统 Node.js + npm 全局安装", self.readme)
