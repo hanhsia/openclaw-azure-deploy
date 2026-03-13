@@ -409,6 +409,42 @@ class AzureIntegrationDeploymentTests(unittest.TestCase):
             self.assertTrue(openclaw_public_url.startswith("https://"))
             self.assertIn(vm_name, vm_public_fqdn)
 
+            extension_name = f"{vm_name}/openclaw-bootstrap"
+            self._log(
+                cloud_name,
+                f"Checking VM extension resource {extension_name}",
+            )
+            extension_show = json.loads(
+                run_az(
+                    [
+                        "resource",
+                        "show",
+                        "--resource-group",
+                        resource_group_name,
+                        "--resource-type",
+                        "Microsoft.Compute/virtualMachines/extensions",
+                        "--name",
+                        extension_name,
+                        "--output",
+                        "json",
+                    ],
+                    cloud_name,
+                )
+            )
+            extension_provisioning_state = extension_show.get("properties", {}).get(
+                "provisioningState", ""
+            )
+            deployment_metadata["bootstrapExtensionName"] = extension_name
+            deployment_metadata["bootstrapExtensionProvisioningState"] = (
+                extension_provisioning_state
+            )
+            self.assertEqual(extension_show["name"], extension_name)
+            self.assertEqual(extension_provisioning_state, "Succeeded")
+            self._log(
+                cloud_name,
+                f"VM extension {extension_name} provisioningState={extension_provisioning_state}",
+            )
+
             if cloud_name == GLOBAL_CLOUD and self.env.get("TEST_MSTEAMS_APP_ID"):
                 bot_name = f"{vm_name}-bot"
                 deployment_metadata["teamsBotName"] = bot_name

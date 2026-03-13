@@ -6,11 +6,11 @@ Use the button below to easily deploy OpenClaw to your Azure environment.
 
 Azure 全球用户 / Azure Global users:
 
-[![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fhanhsia%2Fopenclaw-azure-deploy%2Fmain%2Fazuredeploy.json/createUIDefinitionUri/https%3A%2F%2Fraw.githubusercontent.com%2Fhanhsia%2Fopenclaw-azure-deploy%2Fmain%2FcreateUiDefinition.json)
+[![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fhanhsia%2Fopenclaw-azure-deploy%2Fglobalupdate%2Fazuredeploy.json/createUIDefinitionUri/https%3A%2F%2Fraw.githubusercontent.com%2Fhanhsia%2Fopenclaw-azure-deploy%2Fglobalupdate%2FcreateUiDefinition.json)
 
 Azure 中国区用户 / Azure China users:
 
-[![Deploy to Azure China](https://aka.ms/deploytoazurebutton)](https://portal.azure.cn/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fhanhsia%2Fopenclaw-azure-deploy%2Fmain%2Fazuredeploy.json/createUIDefinitionUri/https%3A%2F%2Fraw.githubusercontent.com%2Fhanhsia%2Fopenclaw-azure-deploy%2Fmain%2FcreateUiDefinition.json)
+[![Deploy to Azure China](https://aka.ms/deploytoazurebutton)](https://portal.azure.cn/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fhanhsia%2Fopenclaw-azure-deploy%2Fglobalupdate%2Fazuredeploy.json/createUIDefinitionUri/https%3A%2F%2Fraw.githubusercontent.com%2Fhanhsia%2Fopenclaw-azure-deploy%2Fglobalupdate%2FcreateUiDefinition.json)
 
 <a id="zh-cn"></a>
 # 中文部署指南
@@ -151,6 +151,20 @@ openclaw-approve-browser
 ```
 然后返回浏览器刷新页面，即可正常使用 OpenClaw。
 
+## 4. 后续升级
+
+这个模板会在虚拟机中使用**系统 Node.js + npm 全局安装** OpenClaw，而不是使用 `/opt/openclaw` 前缀下的内置运行时安装。这样做的目的，是让后续升级路径更接近 OpenClaw 官方文档中的 global install 方式。
+
+部署完成后，如果你需要升级 OpenClaw，建议在虚拟机中执行：
+
+```bash
+sudo npm i -g openclaw@latest
+openclaw doctor
+openclaw gateway restart
+```
+
+这样至少可以明确通过 npm 完成核心程序升级；相比旧的 `/opt/openclaw` 前缀安装方式，`openclaw update` 也更容易识别当前安装属于包管理器安装。
+
 ## 进阶：使用 Azure CLI 部署（替代方案）
 
 如果您熟悉命令行操作，也可以跳过网页一键部署，直接使用 Azure CLI 完成部署。此方式适合自动化脚本或不方便使用浏览器的场景。
@@ -180,7 +194,7 @@ az group create --name rg-openclaw-sea --location southeastasia
 az deployment group create \
   --name openclaw-sea-20260307 \
   --resource-group rg-openclaw-sea \
-  --template-uri https://raw.githubusercontent.com/hanhsia/openclaw-azure-deploy/main/azuredeploy.json \
+  --template-uri https://raw.githubusercontent.com/hanhsia/openclaw-azure-deploy/globalupdate/azuredeploy.json \
   --parameters \
     vmName=openclaw-sea-20260307 \
     location=southeastasia \
@@ -464,6 +478,20 @@ openclaw-approve-browser
 ```
 Then return to the browser and refresh the page to start using OpenClaw.
 
+## 4. Updating Later
+
+This template installs OpenClaw with **system Node.js + global npm install** on the VM instead of using the older `/opt/openclaw` prefixed runtime layout. That keeps the deployment closer to OpenClaw's documented global-install upgrade path.
+
+After deployment, when you want to upgrade OpenClaw on the VM, run:
+
+```bash
+sudo npm i -g openclaw@latest
+openclaw doctor
+openclaw gateway restart
+```
+
+This gives you an explicit npm-based core upgrade path, and it also makes `openclaw update` more likely to recognize the install as a package-manager install.
+
 ## Advanced: Deploy with Azure CLI (Alternative)
 
 If you prefer the command line, you can skip the web-based one-click deployment and deploy directly with Azure CLI. This is useful for automation or when using a browser is inconvenient.
@@ -493,7 +521,7 @@ If you want Azure OpenAI configured during deployment, provide `azureOpenAiEndpo
 az deployment group create \
   --name openclaw-sea-20260307 \
   --resource-group rg-openclaw-sea \
-  --template-uri https://raw.githubusercontent.com/hanhsia/openclaw-azure-deploy/main/azuredeploy.json \
+  --template-uri https://raw.githubusercontent.com/hanhsia/openclaw-azure-deploy/globalupdate/azuredeploy.json \
   --parameters \
     vmName=openclaw-sea-20260307 \
     location=southeastasia \

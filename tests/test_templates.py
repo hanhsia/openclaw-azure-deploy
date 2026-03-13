@@ -213,11 +213,18 @@ class AzureDeployTemplateTests(unittest.TestCase):
             self.bootstrap_script,
         )
         self.assertIn(
-            "for candidate in /opt/openclaw/tools/node-v*/bin; do",
+            "https://deb.nodesource.com/node_24.x nodistro main",
             self.bootstrap_script,
         )
         self.assertIn(
-            'ln -sf "$OPENCLAW_NODE_BIN/npm" /usr/local/bin/npm',
+            "npm install -g openclaw@latest",
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            'OPENCLAW_BIN="$(command -v openclaw || true)"', self.bootstrap_script
+        )
+        self.assertIn(
+            'ln -sf "$OPENCLAW_BIN" /usr/local/bin/openclaw',
             self.bootstrap_script,
         )
         self.assertIn('MSTEAMS_APP_ID="$MSTEAMS_APP_ID"', self.bootstrap_script)
@@ -245,18 +252,16 @@ class AzureDeployTemplateTests(unittest.TestCase):
         self.assertIn(
             "openclaw plugins install @openclaw/msteams", self.bootstrap_script
         )
+        self.assertIn(". /etc/openclaw/openclaw.env", self.bootstrap_script)
         self.assertIn(
-            "npm install --prefix /opt/openclaw/lib/node_modules/openclaw/extensions/msteams",
+            'sudo -u {5} env HOME=/home/{5} OPENCLAW_HOME=/home/{5} OPENCLAW_STATE_DIR=/data OPENCLAW_CONFIG_PATH=/data/openclaw.json OPENCLAW_GATEWAY_TOKEN="$OPENCLAW_GATEWAY_TOKEN" OPENAI_API_KEY="$OPENAI_API_KEY" FEISHU_APP_ID="$FEISHU_APP_ID" FEISHU_APP_SECRET="$FEISHU_APP_SECRET" MSTEAMS_APP_ID="$MSTEAMS_APP_ID" MSTEAMS_APP_PASSWORD="$MSTEAMS_APP_PASSWORD" MSTEAMS_TENANT_ID="$MSTEAMS_TENANT_ID" /usr/local/bin/openclaw plugins install @openclaw/msteams',
             self.bootstrap_script,
         )
-        self.assertIn(
-            "if [ -d /opt/openclaw/lib/node_modules/openclaw/extensions/msteams ]; then",
-            self.bootstrap_script,
-        )
-        self.assertIn(
-            "else\n    sudo -u {5} env HOME=/home/{5} OPENCLAW_HOME=/home/{5} /usr/local/bin/openclaw plugins install @openclaw/msteams",
-            self.bootstrap_script,
-        )
+
+    def test_readme_documents_global_npm_update_path(self):
+        self.assertIn("系统 Node.js + npm 全局安装", self.readme)
+        self.assertIn("sudo npm i -g openclaw@latest", self.readme)
+        self.assertIn("system Node.js + global npm install", self.readme)
 
     def test_local_teams_app_package_template_exists(self):
         build_script = REPO_ROOT / "teams-app-package" / "build-app-package.ps1"
