@@ -255,6 +255,22 @@ class AzureIntegrationDeploymentTests(unittest.TestCase):
             )
             time.sleep(DELETE_WAIT_POLL_SECONDS)
 
+    def _resource_group_has_resources(self, cloud_name, resource_group_name):
+        resources_output = run_az(
+            [
+                "resource",
+                "list",
+                "--resource-group",
+                resource_group_name,
+                "--query",
+                "length(@)",
+                "--output",
+                "tsv",
+            ],
+            cloud_name,
+        )
+        return int(resources_output.strip() or "0") > 0
+
     def setUp(self):
         if self.env.get("TEST_RUN_INTEGRATION", "0") != "1":
             self.skipTest(
@@ -446,7 +462,8 @@ class AzureIntegrationDeploymentTests(unittest.TestCase):
             )
 
             if cloud_name == GLOBAL_CLOUD and self.env.get("TEST_MSTEAMS_APP_ID"):
-                bot_name = f"{vm_name}-bot"
+                bot_name = outputs.get("teamsBotName", {}).get("value", "")
+                self.assertTrue(bot_name)
                 deployment_metadata["teamsBotName"] = bot_name
                 self._log(cloud_name, f"Checking Teams bot resource {bot_name}")
                 bot_show = json.loads(
@@ -482,11 +499,19 @@ class AzureIntegrationDeploymentTests(unittest.TestCase):
         finally:
             if rg_created:
                 if self._keep_resource_group():
+                    ensure_cloud(cloud_name)
+                    if self._resource_group_has_resources(
+                        cloud_name, resource_group_name
+                    ):
+                        self._log(
+                            cloud_name,
+                            f"Keeping resource group {resource_group_name} because TEST_KEEP_RESOURCE_GROUP=1 and it contains deployed resources",
+                        )
+                        return
                     self._log(
                         cloud_name,
-                        f"Keeping resource group {resource_group_name} because TEST_KEEP_RESOURCE_GROUP=1",
+                        f"Deleting empty resource group {resource_group_name} even though TEST_KEEP_RESOURCE_GROUP=1",
                     )
-                    return
                 self._log(cloud_name, f"Deleting resource group {resource_group_name}")
                 ensure_cloud(cloud_name)
                 run_az(

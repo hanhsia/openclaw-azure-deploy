@@ -244,7 +244,6 @@ sudo cat /data/openclaw.json
 2. 在部署表单中填写 `msteamsAppId` 和 `msteamsAppPassword`。
 3. 模板会自动：
   - 创建 Azure Bot 资源并启用 Teams channel
-  - 在虚拟机中安装 `@openclaw/msteams` 插件
   - 将 Teams 通道配置写入 OpenClaw
   - 通过 Caddy 暴露 `https://<你的域名>/api/messages`
 4. 部署完成后，您仍需在 Teams 侧单独完成 Teams app manifest/package 的上传与安装。
@@ -569,7 +568,6 @@ Before you enter `msteamsAppId` and `msteamsAppPassword` in the deployment form,
 2. Enter `msteamsAppId` and `msteamsAppPassword` in the deployment form.
 3. The template automatically:
   - creates the Azure Bot resource and enables the Teams channel
-  - installs the `@openclaw/msteams` plugin on the VM
   - writes the Teams channel configuration into OpenClaw
   - exposes `https://<your-hostname>/api/messages` through Caddy
 4. After deployment, you still need to upload and install the Teams app manifest/package on the Teams side.

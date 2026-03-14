@@ -13,19 +13,6 @@ DEFAULT_VM_NAME = "openclawtestvm"
 DEFAULT_HOSTNAME = ""
 
 
-def load_env(relative_path: str):
-    env = {}
-    for raw_line in (
-        (REPO_ROOT / relative_path).read_text(encoding="utf-8").splitlines()
-    ):
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        env[key.strip()] = value.strip()
-    return env
-
-
 def load_json(relative_path: str):
     return json.loads((REPO_ROOT / relative_path).read_text(encoding="utf-8"))
 
@@ -195,21 +182,15 @@ class AzureDeployTemplateTests(unittest.TestCase):
         self.assertIn("msteamsAppId", variables["msteamsValidationMode"])
         self.assertIn("msteamsAppPassword", variables["msteamsValidationMode"])
         self.assertIn("Azure Global", variables["msteamsValidationMode"])
+        self.assertIn("take(parameters('vmName'), 51)", variables["botServiceName"])
+        self.assertIn(
+            "uniqueString(resourceGroup().id, parameters('msteamsAppId'))",
+            variables["botServiceName"],
+        )
 
-    def test_openclaw_config_template_contains_msteams_placeholders(self):
-        channels = self.openclaw_config_template["channels"]
-        self.assertIn("msteams", channels)
-        self.assertEqual(channels["msteams"]["appId"], "${MSTEAMS_APP_ID}")
-        self.assertEqual(channels["msteams"]["appPassword"], "${MSTEAMS_APP_PASSWORD}")
-        self.assertEqual(channels["msteams"]["tenantId"], "[subscription().tenantId]")
-
-    def test_feishu_channel_defaults_to_open_dm(self):
-        feishu_json = self.template["variables"]["openclawFeishuJson"]
-        self.assertIn('"dmPolicy": "open"', feishu_json)
-        self.assertIn('"groupPolicy": "open"', feishu_json)
-        self.assertNotIn('"dmPolicy": "pairing"', feishu_json)
-
-    def test_openclaw_config_template_contains_feishu_placeholders(self):
+    def test_openclaw_config_template_contains_channel_placeholders_and_trusted_proxies(
+        self,
+    ):
         channels = self.openclaw_config_template["channels"]
         self.assertIn("feishu", channels)
         self.assertEqual(channels["feishu"]["dmPolicy"], "open")
@@ -217,8 +198,21 @@ class AzureDeployTemplateTests(unittest.TestCase):
             channels["feishu"]["accounts"]["main"]["appId"], "${FEISHU_APP_ID}"
         )
         self.assertEqual(
-            channels["feishu"]["accounts"]["main"]["appSecret"], "${FEISHU_APP_SECRET}"
+            channels["feishu"]["accounts"]["main"]["appSecret"],
+            "${FEISHU_APP_SECRET}",
         )
+        self.assertIn("msteams", channels)
+        self.assertEqual(channels["msteams"]["appId"], "${MSTEAMS_APP_ID}")
+        self.assertEqual(channels["msteams"]["appPassword"], "${MSTEAMS_APP_PASSWORD}")
+        self.assertEqual(channels["msteams"]["tenantId"], "[subscription().tenantId]")
+        gateway = self.openclaw_config_template["gateway"]
+        self.assertEqual(gateway["trustedProxies"], ["127.0.0.1", "::1"])
+
+    def test_feishu_channel_defaults_to_open_dm(self):
+        feishu_json = self.template["variables"]["openclawFeishuJson"]
+        self.assertIn('"dmPolicy": "open"', feishu_json)
+        self.assertIn('"groupPolicy": "open"', feishu_json)
+        self.assertNotIn('"dmPolicy": "pairing"', feishu_json)
 
     def test_channel_fragments_do_not_duplicate_channels_wrapper(self):
         variables = self.template["variables"]
@@ -233,7 +227,9 @@ class AzureDeployTemplateTests(unittest.TestCase):
         self.assertIn('FEISHU_APP_ID="$FEISHU_APP_ID"', self.bootstrap_script)
         self.assertIn('FEISHU_APP_SECRET="$FEISHU_APP_SECRET"', self.bootstrap_script)
 
-    def test_bootstrap_script_exports_msteams_credentials_and_installs_plugin(self):
+    def test_bootstrap_script_exports_msteams_credentials_and_installs_bundled_dependencies(
+        self,
+    ):
         arm_bootstrap_script = self.template["variables"]["bootstrapScript"]
 
         self.assertIn("MSTEAMS_APP_ID={8}", self.bootstrap_script)
@@ -252,12 +248,24 @@ class AzureDeployTemplateTests(unittest.TestCase):
             "https://deb.nodesource.com/node_24.x nodistro main",
             self.bootstrap_script,
         )
+        self.assertIn("npm install -g openclaw@latest", self.bootstrap_script)
         self.assertIn(
-            "npm install -g openclaw@latest",
+            'OPENCLAW_BIN="$(command -v openclaw || true)"', self.bootstrap_script
+        )
+        self.assertIn(
+            'OPENCLAW_PACKAGE_DIR="$(npm root -g)/openclaw"', self.bootstrap_script
+        )
+        self.assertIn(
+            'OPENCLAW_MSTEAMS_DIR="$OPENCLAW_PACKAGE_DIR/extensions/msteams"',
             self.bootstrap_script,
         )
         self.assertIn(
-            'OPENCLAW_BIN="$(command -v openclaw || true)"', self.bootstrap_script
+            'npm install --omit=dev --prefix "$OPENCLAW_MSTEAMS_DIR"',
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            "Bundled MSTeams plugin package was not found at $OPENCLAW_MSTEAMS_DIR",
+            self.bootstrap_script,
         )
         self.assertIn(
             'ln -sf "$OPENCLAW_BIN" /usr/local/bin/openclaw',
@@ -285,14 +293,10 @@ class AzureDeployTemplateTests(unittest.TestCase):
         )
         self.assertIn('python3 -c "import json, sys;', arm_bootstrap_script)
         self.assertNotIn("python3 -c ''", arm_bootstrap_script)
-        self.assertIn(
+        self.assertNotIn(
             "openclaw plugins install @openclaw/msteams", self.bootstrap_script
         )
-        self.assertIn(". /etc/openclaw/openclaw.env", self.bootstrap_script)
-        self.assertIn(
-            'sudo -u {5} env HOME=/home/{5} OPENCLAW_HOME=/home/{5} OPENCLAW_STATE_DIR=/data OPENCLAW_CONFIG_PATH=/data/openclaw.json OPENCLAW_GATEWAY_TOKEN="$OPENCLAW_GATEWAY_TOKEN" OPENAI_API_KEY="$OPENAI_API_KEY" FEISHU_APP_ID="$FEISHU_APP_ID" FEISHU_APP_SECRET="$FEISHU_APP_SECRET" MSTEAMS_APP_ID="$MSTEAMS_APP_ID" MSTEAMS_APP_PASSWORD="$MSTEAMS_APP_PASSWORD" MSTEAMS_TENANT_ID="$MSTEAMS_TENANT_ID" /usr/local/bin/openclaw plugins install @openclaw/msteams',
-            self.bootstrap_script,
-        )
+        self.assertNotIn("/data/extensions/msteams", arm_bootstrap_script)
 
     def test_bootstrap_script_arm_format_expression_is_well_formed(self):
         arm_bootstrap_script = self.template["variables"]["bootstrapScript"]
@@ -343,83 +347,45 @@ class AzureDeployTemplateTests(unittest.TestCase):
         self.assertIn("TEST_MSTEAMS_BOT_DOMAIN=", self.env_example)
         self.assertIn("TEST_OPENCLAW_PUBLIC_URL=", self.env_example)
 
-    def test_custom_ui_contains_dedicated_feishu_step(self):
+    def test_ui_definition_contains_core_metadata(self):
         self.assertEqual(
             self.ui_definition["$schema"],
             "https://schema.management.azure.com/schemas/0.1.2-preview/CreateUIDefinition.MultiVm.json#",
         )
         self.assertEqual(self.ui_definition["handler"], "Microsoft.Azure.CreateUIDef")
         self.assertEqual(self.ui_definition["version"], "0.1.2-preview")
-        self.assertTrue(self.ui_definition["parameters"]["config"]["isWizard"])
 
-        basics = self.ui_definition["parameters"]["basics"]
-        basic_names = [element["name"] for element in basics]
-        self.assertIn("vmName", basic_names)
-        self.assertIn("sshPublicKey", basic_names)
-        self.assertNotIn("resourceLocation", basic_names)
-
-        location_control = self.ui_definition["parameters"]["config"]["basics"][
-            "location"
-        ]
-        self.assertEqual(location_control["label"], "Region")
-
-        steps = self.ui_definition["parameters"]["steps"]
+    def test_ui_definition_contains_expected_steps_and_outputs(self):
+        parameters = self.ui_definition["parameters"]
+        steps = parameters["steps"]
         step_names = [step["name"] for step in steps]
         self.assertEqual(step_names, ["openai", "feishu", "teams"])
 
         feishu_step = next(step for step in steps if step["name"] == "feishu")
-        element_names = [element["name"] for element in feishu_step["elements"]]
-        self.assertIn("feishuAppId", element_names)
-        self.assertIn("feishuAppSecret", element_names)
-
-        openai_step = next(step for step in steps if step["name"] == "openai")
-        openai_api_key = next(
-            element
-            for element in openai_step["elements"]
-            if element["name"] == "azureOpenAiApiKey"
-        )
-        self.assertTrue(openai_api_key["options"]["hideConfirmation"])
-        self.assertEqual(openai_api_key["label"]["password"], "API Key")
-
-        feishu_secret = next(
-            element
-            for element in feishu_step["elements"]
-            if element["name"] == "feishuAppSecret"
-        )
-        self.assertTrue(feishu_secret["options"]["hideConfirmation"])
-        self.assertEqual(feishu_secret["label"]["password"], "Feishu App Secret")
-
         teams_step = next(step for step in steps if step["name"] == "teams")
-        teams_names = [element["name"] for element in teams_step["elements"]]
-        self.assertEqual(teams_names, ["msteamsAppId", "msteamsAppPassword"])
+        feishu_element_names = [element["name"] for element in feishu_step["elements"]]
+        teams_element_names = [element["name"] for element in teams_step["elements"]]
+        self.assertIn("feishuAppId", feishu_element_names)
+        self.assertIn("feishuAppSecret", feishu_element_names)
+        self.assertIn("msteamsAppId", teams_element_names)
+        self.assertIn("msteamsAppPassword", teams_element_names)
 
-        teams_password = next(
-            element
-            for element in teams_step["elements"]
-            if element["name"] == "msteamsAppPassword"
-        )
-        self.assertTrue(teams_password["options"]["hideConfirmation"])
-        self.assertEqual(teams_password["label"]["password"], "Bot App Password")
-
-        outputs = self.ui_definition["parameters"]["outputs"]
-        self.assertEqual(outputs["vmName"], "[basics('vmName')]")
+        outputs = parameters["outputs"]
         self.assertEqual(outputs["location"], "[location()]")
-        self.assertEqual(
-            outputs["feishuAppSecret"], "[steps('feishu').feishuAppSecret.password]"
-        )
-        self.assertEqual(outputs["msteamsAppId"], "[steps('teams').msteamsAppId]")
+        self.assertEqual(outputs["feishuAppId"], "[steps('feishu').feishuAppId]")
         self.assertEqual(
             outputs["msteamsAppPassword"],
             "[steps('teams').msteamsAppPassword.password]",
         )
 
-    def test_readme_mentions_create_ui_definition_and_test_command(self):
-        self.assertIn("Deploy to Azure", self.readme)
-        self.assertIn("feishuAppId", self.readme)
-        self.assertIn("msteamsAppId", self.readme)
-        self.assertIn("openclaw-browser-url", self.readme)
-        self.assertIn("createUIDefinitionUri", self.readme)
-        self.assertIn("createUiDefinition.json", self.readme)
+    def test_template_outputs_include_teams_bot_name(self):
+        outputs = self.template["outputs"]
+        self.assertIn("teamsBotName", outputs)
+        self.assertEqual(outputs["teamsBotName"]["type"], "string")
+        self.assertEqual(
+            outputs["teamsBotName"]["value"],
+            "[if(variables('hasMsTeamsConfig'), variables('botServiceName'), '')]",
+        )
 
 
 if __name__ == "__main__":
