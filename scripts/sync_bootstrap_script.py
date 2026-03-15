@@ -15,6 +15,68 @@ DEFAULT_ARM_EXPRESSION_PATH = (
     REPO_ROOT / "generated" / "bootstrapScript.arm-expression.txt"
 )
 DEFAULT_AZUREDEPLOY_PATH = REPO_ROOT / "azuredeploy.json"
+DEFAULT_OPENCLAW_CONFIG_TEMPLATE_PATH = REPO_ROOT / "openclawConfig.template.json"
+
+HELPER_TEMPLATE_PATHS = {
+    "openclaw-browser-url": REPO_ROOT / "openclaw-browser-url.template.sh",
+    "openclaw-approve-browser": REPO_ROOT / "openclaw-approve-browser.template.sh",
+    "openclaw-approve-teams-pairing": REPO_ROOT
+    / "openclaw-approve-teams-pairing.template.sh",
+}
+
+HELPER_TEMPLATE_MARKERS = {
+    "openclaw-browser-url": "__OPENCLAW_BROWSER_URL_TEMPLATE__",
+    "openclaw-approve-browser": "__OPENCLAW_APPROVE_BROWSER_TEMPLATE__",
+    "openclaw-approve-teams-pairing": "__OPENCLAW_APPROVE_TEAMS_PAIRING_TEMPLATE__",
+}
+
+OPENCLAW_CONFIG_REVIEW_NOTE = (
+    "Extracted from azuredeploy.json variables.openclawConfig for easier review."
+)
+
+OPENCLAW_CONFIG_ARM_PLACEHOLDERS = {
+    "variables('openclawDefaultModelJson')": (
+        "Optional JSON fragment injected when Azure OpenAI is configured"
+    ),
+    "variables('openclawModelsJson')": (
+        "Optional JSON fragment injected when Azure OpenAI is configured"
+    ),
+    "variables('openclawFeishuJson')": (
+        "Optional JSON fragment injected when Feishu is configured"
+    ),
+    "variables('openclawMsTeamsJson')": (
+        "Optional JSON fragment injected when Microsoft Teams is configured"
+    ),
+    "variables('openclawPort')": "Gateway port number",
+    "variables('msteamsPort')": "Webhook listener port for Microsoft Teams",
+    "variables('msteamsWebhookPath')": "Webhook path for Microsoft Teams",
+    "variables('allowedOriginsJson')": (
+        "JSON array string for allowed dashboard origins"
+    ),
+    "${OPENCLAW_GATEWAY_TOKEN}": (
+        "Runtime environment variable from /etc/openclaw/openclaw.env"
+    ),
+    "${FEISHU_APP_ID}": (
+        "Runtime environment variable from /etc/openclaw/openclaw.env"
+    ),
+    "${FEISHU_APP_SECRET}": (
+        "Runtime environment variable from /etc/openclaw/openclaw.env"
+    ),
+    "${MSTEAMS_APP_ID}": (
+        "Runtime environment variable from /etc/openclaw/openclaw.env"
+    ),
+    "${MSTEAMS_APP_PASSWORD}": (
+        "Runtime environment variable from /etc/openclaw/openclaw.env"
+    ),
+}
+
+OPENCLAW_CONFIG_TEMPLATE_FRAGMENTS = {
+    "afterAgentsDefaults": "variables('openclawDefaultModelJson')",
+    "afterAgentsObject": "variables('openclawModelsJson')",
+    "beforeGateway": (
+        "variables('openclawFeishuJson') and variables('openclawMsTeamsJson')"
+    ),
+}
 
 
 def _arm_format_arguments() -> str:
@@ -37,6 +99,10 @@ def write_text(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8", newline="\n")
 
 
+def read_json(path: Path) -> dict:
+    return json.loads(read_text(path))
+
+
 def validate_template_placeholders(template_text: str) -> None:
     for match in re.finditer(r"\{([^{}]+)\}", template_text):
         if not re.fullmatch(r"\d+", match.group(1)):
@@ -51,6 +117,14 @@ def validate_shell_syntax(template_path: Path) -> None:
         raise RuntimeError("bash is required to validate bootstrapScript.template.sh")
 
     subprocess.run([bash, "-n", str(template_path)], check=True)
+
+
+def validate_shell_text(label: str, content: str) -> None:
+    bash = shutil.which("bash")
+    if not bash:
+        raise RuntimeError(f"bash is required to validate {label}")
+
+    subprocess.run([bash, "-n"], input=content, text=True, check=True)
 
 
 def strip_generation_preamble(template_text: str) -> str:
@@ -70,10 +144,152 @@ def render_arm_format_expression(string_literal: str) -> str:
     return f"[format({string_literal}{_arm_format_arguments()}"
 
 
+def load_helper_templates() -> dict[str, str]:
+    templates: dict[str, str] = {}
+    for script_name, path in HELPER_TEMPLATE_PATHS.items():
+        template_text = read_text(path)
+        validate_shell_text(path.name, template_text)
+        templates[script_name] = template_text.rstrip("\n")
+    return templates
+
+
+def render_bootstrap_template(template_text: str) -> str:
+    rendered = template_text
+    helper_templates = load_helper_templates()
+    for script_name, marker in HELPER_TEMPLATE_MARKERS.items():
+        if marker not in rendered:
+            raise ValueError(
+                f"Bootstrap template is missing helper marker {marker} for {script_name}."
+            )
+        rendered = rendered.replace(marker, helper_templates[script_name])
+    return rendered
+
+
+def extract_arm_format_string(expression: str) -> str:
+    prefix = "[format('"
+    suffix = ")]"
+    if not expression.startswith(prefix) or not expression.endswith(suffix):
+        raise ValueError("Expression is not an ARM format() call.")
+
+    body = expression[len("[format(") : -2]
+    if not body or body[0] != "'":
+        raise ValueError(
+            "ARM format() expression does not start with a string literal."
+        )
+
+    chars = []
+    index = 1
+    while index < len(body):
+        char = body[index]
+        if char == "'":
+            if index + 1 < len(body) and body[index + 1] == "'":
+                chars.append("'")
+                index += 2
+                continue
+
+            remainder = body[index + 1 :]
+            if not remainder.startswith(", string(variables('openclawPort')),"):
+                raise ValueError(
+                    "ARM format() string literal does not terminate before the expected argument list."
+                )
+            return "".join(chars)
+
+        chars.append(char)
+        index += 1
+
+    raise ValueError("ARM format() string literal was not terminated.")
+
+
+def extract_embedded_script(bootstrap_text: str, script_name: str) -> str:
+    marker = f"cat > /usr/local/bin/{script_name} <<'EOF'\n"
+    start = bootstrap_text.find(marker)
+    if start < 0:
+        raise ValueError(f"Could not find embedded script marker for {script_name}.")
+    start += len(marker)
+
+    end_marker = f"\nEOF\nchmod 755 /usr/local/bin/{script_name}"
+    end = bootstrap_text.find(end_marker, start)
+    if end < 0:
+        raise ValueError(
+            f"Could not find embedded script terminator for {script_name}."
+        )
+
+    return bootstrap_text[start:end] + "\n"
+
+
+def build_openclaw_config_review(azuredeploy_payload: dict) -> dict:
+    variables = azuredeploy_payload["variables"]
+    return {
+        "_note": OPENCLAW_CONFIG_REVIEW_NOTE,
+        "_armPlaceholders": OPENCLAW_CONFIG_ARM_PLACEHOLDERS,
+        "_templateFragments": OPENCLAW_CONFIG_TEMPLATE_FRAGMENTS,
+        "agents": {
+            "defaults": {
+                "workspace": "/data/workspace",
+            }
+        },
+        "channels": {
+            "feishu": {
+                "enabled": True,
+                "accounts": {
+                    "main": {
+                        "appId": "${FEISHU_APP_ID}",
+                        "appSecret": "${FEISHU_APP_SECRET}",
+                    },
+                    "default": {
+                        "dmPolicy": "open",
+                        "groupPolicy": "open",
+                        "allowFrom": ["*"],
+                    },
+                },
+            },
+            "msteams": {
+                "enabled": True,
+                "appId": "${MSTEAMS_APP_ID}",
+                "appPassword": "${MSTEAMS_APP_PASSWORD}",
+                "dmPolicy": "pairing",
+                "groupPolicy": "open",
+                "tenantId": variables["msteamsTenantId"],
+                "webhook": {
+                    "port": "[string(variables('msteamsPort'))]",
+                    "path": "[variables('msteamsWebhookPath')]",
+                },
+            },
+        },
+        "gateway": {
+            "mode": "local",
+            "bind": "loopback",
+            "port": "[string(variables('openclawPort'))]",
+            "controlUi": {
+                "enabled": True,
+                "allowedOrigins": "[variables('allowedOriginsJson')]",
+            },
+            "auth": {
+                "mode": "token",
+                "token": "${OPENCLAW_GATEWAY_TOKEN}",
+            },
+        },
+    }
+
+
+def sync_review_files_from_azuredeploy(
+    azuredeploy_path: Path,
+    openclaw_config_template_path: Path = DEFAULT_OPENCLAW_CONFIG_TEMPLATE_PATH,
+) -> None:
+    payload = read_json(azuredeploy_path)
+    review_payload = build_openclaw_config_review(payload)
+    write_text(
+        openclaw_config_template_path,
+        json.dumps(review_payload, indent=2, ensure_ascii=True) + "\n",
+    )
+
+
 def build_bootstrap_expression(template_path: Path) -> tuple[str, str, str]:
     template_text = read_text(template_path)
-    validate_template_placeholders(template_text)
-    rendered_template_text = strip_generation_preamble(template_text)
+    rendered_template_text = render_bootstrap_template(template_text)
+    validate_template_placeholders(rendered_template_text)
+    validate_shell_text("rendered bootstrap template", rendered_template_text)
+    rendered_template_text = strip_generation_preamble(rendered_template_text)
     string_literal = render_arm_string_literal(rendered_template_text)
     expression = render_arm_format_expression(string_literal)
     return rendered_template_text, string_literal, expression
@@ -93,21 +309,19 @@ def run_sync(
     arm_expression_path: Path,
     azuredeploy_path: Path,
 ) -> None:
-    validate_shell_syntax(template_path)
     _, string_literal, expression = build_bootstrap_expression(template_path)
     write_text(arm_string_path, string_literal + "\n")
     write_text(arm_expression_path, expression + "\n")
     sync_azuredeploy_bootstrap(azuredeploy_path, expression)
+    sync_review_files_from_azuredeploy(azuredeploy_path)
 
 
 def write_arm_string(template_path: Path, output_path: Path) -> None:
-    validate_shell_syntax(template_path)
     _, string_literal, _ = build_bootstrap_expression(template_path)
     write_text(output_path, string_literal + "\n")
 
 
 def write_arm_expression(template_path: Path, output_path: Path) -> None:
-    validate_shell_syntax(template_path)
     _, _, expression = build_bootstrap_expression(template_path)
     write_text(output_path, expression + "\n")
 
@@ -194,6 +408,17 @@ def main() -> None:
         help="Output path for the full [format(...)] ARM expression",
     )
 
+    sync_review_parser = subparsers.add_parser(
+        "sync-review-files",
+        help="Sync openclawConfig.template.json from azuredeploy.json",
+    )
+    sync_review_parser.add_argument(
+        "--azuredeploy",
+        type=Path,
+        default=DEFAULT_AZUREDEPLOY_PATH,
+        help="Path to azuredeploy.json to read from",
+    )
+
     args = parser.parse_args()
 
     if args.command in (None, "sync"):
@@ -211,6 +436,10 @@ def main() -> None:
 
     if args.command == "arm-expression":
         write_arm_expression(template_path=args.template, output_path=args.output)
+        return
+
+    if args.command == "sync-review-files":
+        sync_review_files_from_azuredeploy(azuredeploy_path=args.azuredeploy)
         return
 
     parser.error(f"Unsupported command: {args.command}")

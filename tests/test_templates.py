@@ -6,7 +6,11 @@ from pathlib import Path
 from scripts.sync_bootstrap_script import (
     DEFAULT_ARM_EXPRESSION_PATH,
     DEFAULT_ARM_STRING_PATH,
+    HELPER_TEMPLATE_PATHS,
     build_bootstrap_expression,
+    build_openclaw_config_review,
+    extract_arm_format_string,
+    extract_embedded_script,
 )
 
 
@@ -21,41 +25,6 @@ DEFAULT_HOSTNAME = ""
 
 def load_json(relative_path: str):
     return json.loads((REPO_ROOT / relative_path).read_text(encoding="utf-8"))
-
-
-def extract_arm_format_string(expression: str) -> str:
-    prefix = "[format('"
-    suffix = ")]"
-    if not expression.startswith(prefix) or not expression.endswith(suffix):
-        raise ValueError("Expression is not an ARM format() call.")
-
-    body = expression[len("[format(") : -2]
-    if not body or body[0] != "'":
-        raise ValueError(
-            "ARM format() expression does not start with a string literal."
-        )
-
-    chars = []
-    index = 1
-    while index < len(body):
-        char = body[index]
-        if char == "'":
-            if index + 1 < len(body) and body[index + 1] == "'":
-                chars.append("'")
-                index += 2
-                continue
-
-            remainder = body[index + 1 :]
-            if not remainder.startswith(", string(variables('openclawPort')),"):
-                raise ValueError(
-                    "ARM format() string literal does not terminate before the expected argument list."
-                )
-            return "".join(chars)
-
-        chars.append(char)
-        index += 1
-
-    raise ValueError("ARM format() string literal was not terminated.")
 
 
 def expected_public_dns_suffix(cloud_name: str) -> str:
@@ -85,9 +54,6 @@ class AzureDeployTemplateTests(unittest.TestCase):
         cls.template = load_json("azuredeploy.json")
         cls.ui_definition = load_json("createUiDefinition.json")
         cls.openclaw_config_template = load_json("openclawConfig.template.json")
-        cls.bootstrap_script = (REPO_ROOT / "bootstrapScript.template.sh").read_text(
-            encoding="utf-8"
-        )
         cls.teams_manifest_template = (
             REPO_ROOT / "teams-app-package" / "manifest.template.json"
         ).read_text(encoding="utf-8")
@@ -99,9 +65,11 @@ class AzureDeployTemplateTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         cls.env_example = (REPO_ROOT / ".env.example").read_text(encoding="utf-8")
         cls.readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
-        _, cls.expected_arm_string_literal, cls.expected_arm_expression = (
-            build_bootstrap_expression(REPO_ROOT / "bootstrapScript.template.sh")
-        )
+        (
+            cls.bootstrap_script,
+            cls.expected_arm_string_literal,
+            cls.expected_arm_expression,
+        ) = build_bootstrap_expression(REPO_ROOT / "bootstrapScript.template.sh")
 
     def test_template_json_is_valid(self):
         self.assertIn("parameters", self.template)
@@ -223,6 +191,12 @@ class AzureDeployTemplateTests(unittest.TestCase):
         gateway = self.openclaw_config_template["gateway"]
         self.assertNotIn("trustedProxies", gateway)
 
+    def test_openclaw_config_review_file_is_in_sync(self):
+        self.assertEqual(
+            self.openclaw_config_template,
+            build_openclaw_config_review(self.template),
+        )
+
     def test_feishu_channel_defaults_to_open_dm(self):
         feishu_json = self.template["variables"]["openclawFeishuJson"]
         self.assertIn('"main": {', feishu_json)
@@ -316,11 +290,15 @@ class AzureDeployTemplateTests(unittest.TestCase):
             self.bootstrap_script,
         )
         self.assertIn(
-            'OPENCLAW_PACKAGE_DIR="$OPENCLAW_INSTALL_PREFIX/lib/node_modules/openclaw"',
+            'OPENCLAW_RUNTIME_NODE_MODULES_DIR="$(sudo -u {5} bash -lc \'export PATH="$(dirname "$1"):$PATH" && "$1" root -g\' _ "$OPENCLAW_NPM_BIN")"',
             self.bootstrap_script,
         )
         self.assertIn(
-            'OPENCLAW_MSTEAMS_DIR="$OPENCLAW_PACKAGE_DIR/extensions/msteams"',
+            'OPENCLAW_RUNTIME_PACKAGE_DIR="$OPENCLAW_RUNTIME_NODE_MODULES_DIR/openclaw"',
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            'OPENCLAW_MSTEAMS_DIR="$OPENCLAW_RUNTIME_PACKAGE_DIR/extensions/msteams"',
             self.bootstrap_script,
         )
         self.assertIn(
@@ -328,11 +306,15 @@ class AzureDeployTemplateTests(unittest.TestCase):
             self.bootstrap_script,
         )
         self.assertIn(
-            "Bundled MSTeams plugin package was not found at $OPENCLAW_MSTEAMS_DIR",
+            "OpenClaw MSTeams plugin package was not found at $OPENCLAW_MSTEAMS_DIR",
             self.bootstrap_script,
         )
         self.assertIn(
             "OpenClaw npm binary was not found after install-cli.sh completed: $OPENCLAW_NPM_BIN",
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            "OpenClaw runtime package directory was not found after install-cli.sh completed: $OPENCLAW_RUNTIME_PACKAGE_DIR",
             self.bootstrap_script,
         )
         self.assertIn(
@@ -506,6 +488,17 @@ class AzureDeployTemplateTests(unittest.TestCase):
             self.template["variables"]["bootstrapScript"],
             self.expected_arm_expression,
         )
+
+    def test_extracted_helper_templates_are_in_sync(self):
+        arm_bootstrap_script = extract_arm_format_string(
+            self.template["variables"]["bootstrapScript"]
+        )
+
+        for script_name, path in HELPER_TEMPLATE_PATHS.items():
+            self.assertEqual(
+                path.read_text(encoding="utf-8"),
+                extract_embedded_script(arm_bootstrap_script, script_name),
+            )
 
     def test_readme_documents_user_prefix_update_path(self):
         self.assertIn("官方 `install-cli.sh` 安装器", self.readme)

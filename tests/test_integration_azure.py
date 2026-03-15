@@ -272,9 +272,12 @@ class AzureIntegrationDeploymentTests(unittest.TestCase):
                 '&& printf "config_path=%s\\n" "$OPENCLAW_CONFIG_PATH" '
                 '&& printf "compile_cache=%s\\n" "$NODE_COMPILE_CACHE" '
                 '&& printf "no_respawn=%s\\n" "$OPENCLAW_NO_RESPAWN" '
+                '&& runtime_npm_root="$(/home/{user}/.openclaw/tools/node/bin/npm root -g)" '
+                '&& printf "runtime_package_dir=%s\\n" "$runtime_npm_root/openclaw" '
+                '&& if test -f "$runtime_npm_root/openclaw/extensions/msteams/package.json"; then echo runtime_msteams_package_json=present; else echo runtime_msteams_package_json=missing; fi '
+                '&& if test -d "$runtime_npm_root/openclaw/extensions/msteams/node_modules/@microsoft/agents-hosting"; then echo runtime_msteams_agents_hosting=present; else echo runtime_msteams_agents_hosting=missing; fi '
                 '&& printf "gateway_state=%s\\n" "$(systemctl --user is-active openclaw-gateway)" '
-                "&& test -f /home/{user}/.openclaw/lib/node_modules/openclaw/extensions/msteams/package.json "
-                "&& echo msteams_package_json=present'"
+                "'"
             ).format(user=DEFAULT_ADMIN_USERNAME),
         )
         values = {}
@@ -307,11 +310,19 @@ class AzureIntegrationDeploymentTests(unittest.TestCase):
             f"/home/{DEFAULT_ADMIN_USERNAME}/.openclaw/cache/node-compile",
         )
         self.assertEqual(values.get("no_respawn"), "1")
+        self.assertEqual(
+            values.get("runtime_package_dir"),
+            "/data/tools/node-v24.14.0/lib/node_modules/openclaw",
+        )
         self.assertEqual(values.get("gateway_state"), "active")
         if self.env.get("TEST_MSTEAMS_APP_ID") and self.env.get(
             "TEST_MSTEAMS_APP_PASSWORD"
         ):
-            self.assertEqual(values.get("msteams_package_json"), "present")
+            self.assertEqual(values.get("runtime_msteams_package_json"), "present")
+            self.assertEqual(
+                values.get("runtime_msteams_agents_hosting"),
+                "present",
+            )
 
     def _validate_runtime_doctor_and_update_state(self, cloud_name, vm_public_fqdn):
         doctor_stdout, doctor_stderr = self._run_ssh(
