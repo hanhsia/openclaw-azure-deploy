@@ -98,6 +98,8 @@ ssh -i "$env:USERPROFILE\.ssh\id_ed25519" azureuser@<vmPublicFqdn>
 ```
 *(请将 `<vmPublicFqdn>` 替换为您在部署输出中记录的域名，如有其他私钥名称或位置请相应调整)*
 
+当前模板会在初始化阶段为 `adminUsername` 预装 Linux Homebrew 到 `/home/linuxbrew/.linuxbrew`，并通过 `/etc/profile.d/linuxbrew.sh` 自动加入登录 shell 环境；同一个管理员用户还会收到 `NOPASSWD:ALL` 的 sudoers drop-in，因此 `sudo ...` 默认不会要求输入密码。这个设置是为了把虚拟机当成管理员自管的运维主机使用，不适合低权限多人共用跳板机场景。
+
 #### 获取 Web 控制台地址
 登录成功后，在已经 SSH 进入 Azure 虚拟机的远程终端中执行：
 ```bash
@@ -152,6 +154,21 @@ openclaw-approve-browser
 ```
 该 helper 会直接读取本机的浏览器配对队列并批准最新的 Control UI 请求，不依赖 `openclaw devices list/approve` 这条 RPC 路径。如果脚本提示当前没有待处理的浏览器配对请求，请保持浏览器停留在配对页面，等待几秒后重试。
 补充说明：OpenClaw 上游 `2026.3.12` 到 `2026.3.13` 期间存在已知的 loopback WebSocket 握手回归，某些机器上 `openclaw devices list` 可能会报 `gateway closed (1000 normal closure): no close reason`，即使 `openclaw gateway status` 和 `openclaw gateway call device.pair.list --json --params "{}"` 仍然正常。这个 Azure 模板目前不内置 monkey patch，而是避开这条已知不稳定的 wrapper 路径，等待上游正式修复版本。
+如果你需要在已经部署完成的虚拟机上临时恢复这条 wrapper 路径，可以手动放宽已安装 OpenClaw dist 文件里的握手超时，然后重启 gateway。这个 workaround 只对当前机器生效；后续重新安装或 `openclaw update` 后可能需要重新执行：
+```bash
+DIST="$HOME/.openclaw/lib/node_modules/openclaw/dist"
+
+cp "$DIST"/gateway-cli-*.js "$DIST"/model-selection-*.js /tmp/
+
+perl -0pi -e 's/const DEFAULT_HANDSHAKE_TIMEOUT_MS = 3e3;/const DEFAULT_HANDSHAKE_TIMEOUT_MS = 1e4;/g' \
+  "$DIST"/gateway-cli-*.js
+
+perl -0pi -e 's/Math\.max\(250, Math\.min\(1e4, rawConnectDelayMs\)\) : 2e3;/Math.max(250, Math.min(1e4, rawConnectDelayMs)) : 1e4;/g' \
+  "$DIST"/model-selection-*.js
+
+systemctl --user restart openclaw-gateway
+```
+这个 workaround 是基于当前上游 dist bundle 的字面量替换验证出来的，应急时可用，但长期仍应以包含正式修复的上游版本为准。
 然后返回浏览器刷新页面，即可正常使用 OpenClaw。
 
 ## 4. 后续升级
@@ -631,6 +648,8 @@ If you want to continue with manual Teams validation after deployment, see [test
   chmod 600 ~/.ssh/openclaw-key.pem
   ```
 
+After you log in, the template-provisioned admin user already has Linux Homebrew installed at `/home/linuxbrew/.linuxbrew`, and login shells load it automatically via `/etc/profile.d/linuxbrew.sh`. The same admin user is also granted passwordless sudo through a dedicated sudoers drop-in, so `sudo ...` commands do not prompt for a password. Treat the VM as a trusted admin box, not a shared low-privilege shell host.
+
 ### 3. SSH reports `REMOTE HOST IDENTIFICATION HAS CHANGED!`
 **Cause:** Your local `known_hosts` file already contains an older host fingerprint for this domain name, but the virtual machine may have been deleted and recreated, reprovisioned, or the same domain name may now point to a different machine. SSH therefore detects that the remote host key has changed.  
 **Resolution:**
@@ -660,6 +679,21 @@ openclaw-approve-browser
 ```
 The helper reads the local browser pairing queue directly and approves the newest Control UI request without depending on the `openclaw devices list/approve` RPC path. If it reports that there is no pending browser pairing request yet, leave the browser on the pairing screen, wait a few seconds, and rerun it.
 Known upstream note: OpenClaw `2026.3.12` through `2026.3.13` has a reported loopback WebSocket handshake regression on some hosts. In that window, `openclaw devices list` can fail with `gateway closed (1000 normal closure): no close reason` even while `openclaw gateway status` and `openclaw gateway call device.pair.list --json --params "{}"` still succeed. This Azure template does not bake in a runtime monkey patch for that upstream bug; it avoids depending on the unstable wrapper path until an upstream release ships the fix.
+If you need to temporarily restore that wrapper path on an already deployed VM, you can manually widen the installed OpenClaw dist handshake timeouts and restart the gateway. This only affects the current machine; you may need to reapply it after reinstalling OpenClaw or running `openclaw update`:
+```bash
+DIST="$HOME/.openclaw/lib/node_modules/openclaw/dist"
+
+cp "$DIST"/gateway-cli-*.js "$DIST"/model-selection-*.js /tmp/
+
+perl -0pi -e 's/const DEFAULT_HANDSHAKE_TIMEOUT_MS = 3e3;/const DEFAULT_HANDSHAKE_TIMEOUT_MS = 1e4;/g' \
+  "$DIST"/gateway-cli-*.js
+
+perl -0pi -e 's/Math\.max\(250, Math\.min\(1e4, rawConnectDelayMs\)\) : 2e3;/Math.max(250, Math.min(1e4, rawConnectDelayMs)) : 1e4;/g' \
+  "$DIST"/model-selection-*.js
+
+systemctl --user restart openclaw-gateway
+```
+This workaround is an emergency literal replacement against the current upstream dist bundles. It is useful for recovery, but the long-term fix is to upgrade to an upstream release that includes the proper handshake fix.
 After the command finishes, refresh the browser page to enter the dashboard.
 
 ### 6. The browser shows `502 Bad Gateway`

@@ -186,7 +186,8 @@ class AzureDeployTemplateTests(unittest.TestCase):
         )
         self.assertNotIn("OPENCLAW_HOME=/home/{5}", self.bootstrap_script)
         self.assertIn(
-            "set -a\n  . /etc/openclaw/openclaw.env\n  set +a", self.bootstrap_script
+            'OPENCLAW_ORIGINAL_PATH="$PATH"\n  set -a\n  . /etc/openclaw/openclaw.env\n  set +a\n  PATH="/home/{5}/.openclaw/tools/node/bin:/home/{5}/.openclaw/bin:$OPENCLAW_ORIGINAL_PATH"\n  export PATH\n  unset OPENCLAW_ORIGINAL_PATH',
+            self.bootstrap_script,
         )
         self.assertNotIn(".openclaw-env.sh", self.bootstrap_script)
 
@@ -223,12 +224,53 @@ class AzureDeployTemplateTests(unittest.TestCase):
             self.bootstrap_script,
         )
         self.assertIn(
+            "apt-get install -y ca-certificates curl git gnupg caddy build-essential procps file",
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            "cat > /etc/sudoers.d/90-{5}-nopasswd <<EOF",
+            self.bootstrap_script,
+        )
+        self.assertIn("{5} ALL=(ALL:ALL) NOPASSWD:ALL", self.bootstrap_script)
+        self.assertIn(
+            "visudo -cf /etc/sudoers.d/90-{5}-nopasswd",
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            "cat > /etc/profile.d/linuxbrew.sh <<'EOF'",
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"',
+            self.bootstrap_script,
+        )
+        self.assertIn(
             "NODE_COMPILE_CACHE=/home/{5}/.openclaw/cache/node-compile",
             self.bootstrap_script,
         )
         self.assertIn("OPENCLAW_NO_RESPAWN=1", self.bootstrap_script)
         self.assertIn(
             "install -d -o {5} -g {5} /home/{5}/.openclaw/cache/node-compile",
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            "install -d -o {5} -g {5} /home/linuxbrew /home/linuxbrew/.linuxbrew /home/{5}/.cache/Homebrew",
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            'HOMEBREW_PREFIX="/home/linuxbrew/.linuxbrew"',
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            'HOMEBREW_INSTALL_REPO="/tmp/homebrew-install"',
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            'git clone --depth 1 https://github.com/Homebrew/install "$HOMEBREW_INSTALL_REPO"',
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            'sudo -u {5} env HOME="/home/{5}" NONINTERACTIVE=1 CI=1 bash -lc \'cd "$1" && /bin/bash ./install.sh\' _ "$HOMEBREW_INSTALL_REPO"',
             self.bootstrap_script,
         )
         self.assertIn(
@@ -472,6 +514,11 @@ class AzureDeployTemplateTests(unittest.TestCase):
     def test_readme_documents_manual_browser_pairing_fallback(self):
         self.assertIn("openclaw-approve-browser", self.readme)
         self.assertIn("reads the local browser pairing queue directly", self.readme)
+
+    def test_readme_documents_homebrew_and_passwordless_sudo(self):
+        self.assertIn("Homebrew", self.readme)
+        self.assertIn("passwordless sudo", self.readme)
+        self.assertIn("/home/linuxbrew/.linuxbrew", self.readme)
 
     def test_bootstrap_script_arm_format_expression_is_well_formed(self):
         arm_bootstrap_script = self.template["variables"]["bootstrapScript"]
