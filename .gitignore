@@ -13,3 +13,5 @@ teams-app-package/test-output/
 .env.example
 .playwright-mcp/
 teams-app-package/dist/OpenClaw.zip
+generated/
+.generated-*.parameters.json

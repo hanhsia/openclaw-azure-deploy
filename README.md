@@ -114,6 +114,7 @@ Dashboard URL: https://your-hostname/#token=...
 ```bash
 openclaw-approve-browser
 ```
+该 helper 会直接读取本机的浏览器配对队列并批准最新的 Control UI 请求。如果脚本提示当前没有待处理的浏览器配对请求，请保持浏览器停留在配对页面，等待几秒后重试。
 命令执行完毕后，回到浏览器刷新页面即可完成登录。
 
 ---
@@ -149,21 +150,30 @@ openclaw-browser-url
 ```bash
 openclaw-approve-browser
 ```
+该 helper 会直接读取本机的浏览器配对队列并批准最新的 Control UI 请求，不依赖 `openclaw devices list/approve` 这条 RPC 路径。如果脚本提示当前没有待处理的浏览器配对请求，请保持浏览器停留在配对页面，等待几秒后重试。
 然后返回浏览器刷新页面，即可正常使用 OpenClaw。
 
 ## 4. 后续升级
 
-这个模板会在虚拟机中使用**系统 Node.js + npm 全局安装** OpenClaw，而不是使用 `/opt/openclaw` 前缀下的内置运行时安装。这样做的目的，是让后续升级路径更接近 OpenClaw 官方文档中的 global install 方式。
+这个模板会在虚拟机中使用**官方 `install-cli.sh` 安装器**安装 OpenClaw，并将 CLI 与专用 Node 运行时一起安装到 `adminUsername` 对应用户的 `~/.openclaw` 前缀下。当前模板固定使用最新稳定版 Node `24.14.0`，而不是依赖系统 `/usr` 下的全局 Node/npm。这样做既更接近 OpenClaw 官方推荐的无 root CLI 安装路径，也能让部署后的 SSH 管理员用户直接执行 `openclaw update`，避免因为 `/usr/lib/node_modules` 无写权限而失败。
 
-部署完成后，如果你需要升级 OpenClaw，建议在虚拟机中执行：
+部署完成后，如果你需要升级 OpenClaw，建议优先在虚拟机中执行：
 
 ```bash
-sudo npm i -g openclaw@latest
+openclaw update
 openclaw doctor
 openclaw gateway restart
 ```
 
-这样至少可以明确通过 npm 完成核心程序升级；相比旧的 `/opt/openclaw` 前缀安装方式，`openclaw update` 也更容易识别当前安装属于包管理器安装。
+如果你希望显式重跑安装器，也可以执行：
+
+```bash
+curl -fsSL https://openclaw.ai/install-cli.sh | bash -s -- --prefix "$HOME/.openclaw" --node-version 24.14.0 --no-onboard
+openclaw doctor
+openclaw gateway restart
+```
+
+这个安装器会继续写入当前管理员用户的 `~/.openclaw` 前缀，不需要 `sudo`。
 
 ## 进阶：使用 Azure CLI 部署（替代方案）
 
@@ -479,17 +489,25 @@ Then return to the browser and refresh the page to start using OpenClaw.
 
 ## 4. Updating Later
 
-This template installs OpenClaw with **system Node.js + global npm install** on the VM instead of using the older `/opt/openclaw` prefixed runtime layout. That keeps the deployment closer to OpenClaw's documented global-install upgrade path.
+This template installs OpenClaw with the **official `install-cli.sh` installer** and keeps both the CLI and its dedicated Node runtime under the `adminUsername` user's `~/.openclaw` prefix on the VM. The template currently pins the latest stable Node release, `24.14.0`, instead of depending on a system-wide `/usr` Node/npm install. That stays closer to the upstream no-root CLI installation path and still lets the SSH administrator user run `openclaw update` directly without hitting `EACCES` on `/usr/lib/node_modules`.
 
-After deployment, when you want to upgrade OpenClaw on the VM, run:
+After deployment, when you want to upgrade OpenClaw on the VM, prefer:
 
 ```bash
-sudo npm i -g openclaw@latest
+openclaw update
 openclaw doctor
 openclaw gateway restart
 ```
 
-This gives you an explicit npm-based core upgrade path, and it also makes `openclaw update` more likely to recognize the install as a package-manager install.
+If you want to rerun the installer explicitly instead, you can also run:
+
+```bash
+curl -fsSL https://openclaw.ai/install-cli.sh | bash -s -- --prefix "$HOME/.openclaw" --node-version 24.14.0 --no-onboard
+openclaw doctor
+openclaw gateway restart
+```
+
+That installer writes into the administrator user's `~/.openclaw` prefix, so `sudo` is not required.
 
 ## Advanced: Deploy with Azure CLI (Alternative)
 
@@ -635,6 +653,7 @@ Keep the browser page open, switch back to the SSH terminal on the virtual machi
 ```bash
 openclaw-approve-browser
 ```
+The helper reads the local browser pairing queue directly and approves the newest Control UI request without depending on the `openclaw devices list/approve` RPC path. If it reports that there is no pending browser pairing request yet, leave the browser on the pairing screen, wait a few seconds, and rerun it.
 After the command finishes, refresh the browser page to enter the dashboard.
 
 ### 6. The browser shows `502 Bad Gateway`

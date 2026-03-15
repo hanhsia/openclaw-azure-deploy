@@ -1,5 +1,7 @@
+import importlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -26,6 +28,8 @@ DEFAULT_ADMIN_USERNAME = "azureuser"
 DEFAULT_HOSTNAME = ""
 DELETE_WAIT_TIMEOUT_SECONDS = 300
 DELETE_WAIT_POLL_SECONDS = 15
+SSH_EXECUTABLE = shutil.which("ssh.exe") or shutil.which("ssh") or "ssh"
+DEFAULT_SSH_PRIVATE_KEY_PATH = Path.home() / ".ssh" / "id_ed25519"
 SENSITIVE_PARAMETER_KEYS = {
     "azureOpenAiApiKey",
     "feishuAppSecret",
@@ -79,6 +83,9 @@ def load_env(relative_path: str):
             continue
         key, value = line.split("=", 1)
         env[key.strip()] = value.strip()
+    for key, value in os.environ.items():
+        if key.startswith("TEST_"):
+            env[key] = value
     return env
 
 
@@ -93,6 +100,8 @@ def run_az(args, cloud_name):
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         env={**os.environ, "AZURE_CORE_CLOUD": cloud_name},
     )
 
@@ -147,6 +156,321 @@ class AzureIntegrationDeploymentTests(unittest.TestCase):
 
     def _keep_resource_group(self):
         return self.env.get("TEST_KEEP_RESOURCE_GROUP", "0").strip() == "1"
+
+    def _should_validate_browser_pairing(self):
+        return self.env.get("TEST_VALIDATE_BROWSER_PAIRING", "0").strip() == "1"
+
+    def _get_browser_pairing_timeout_seconds(self):
+        raw_value = self.env.get("TEST_BROWSER_PAIRING_TIMEOUT_SECONDS", "90").strip()
+        try:
+            return max(15, int(raw_value or "90"))
+        except ValueError as exc:
+            raise ValueError(
+                "TEST_BROWSER_PAIRING_TIMEOUT_SECONDS must be an integer."
+            ) from exc
+
+    def _use_headless_browser(self):
+        return self.env.get("TEST_BROWSER_PAIRING_HEADLESS", "1").strip() != "0"
+
+    def _ensure_playwright_available(self):
+        if not self._should_validate_browser_pairing():
+            return
+
+        try:
+            importlib.import_module("playwright.sync_api")
+        except ImportError:
+            self.skipTest(
+                "Set TEST_VALIDATE_BROWSER_PAIRING=1 requires the Python 'playwright' package. "
+                "Install it with 'python -m pip install playwright' and install a browser with "
+                "'python -m playwright install chromium'."
+            )
+
+    def _get_playwright_sync_api(self):
+        try:
+            return importlib.import_module("playwright.sync_api")
+        except ImportError:
+            self.skipTest(
+                "Set TEST_VALIDATE_BROWSER_PAIRING=1 requires the Python 'playwright' package. "
+                "Install it with 'python -m pip install playwright' and install a browser with "
+                "'python -m playwright install chromium'."
+            )
+
+    def _get_ssh_private_key_path(self):
+        configured = self.env.get("TEST_SSH_PRIVATE_KEY_PATH", "").strip()
+        return (
+            Path(configured).expanduser()
+            if configured
+            else DEFAULT_SSH_PRIVATE_KEY_PATH
+        )
+
+    def _run_ssh(self, cloud_name, vm_public_fqdn, remote_command):
+        ssh_private_key = self._get_ssh_private_key_path()
+        if not ssh_private_key.exists():
+            self.skipTest(
+                f"SSH private key not found at {ssh_private_key}. Set TEST_SSH_PRIVATE_KEY_PATH or place the key there before running integration tests."
+            )
+
+        command = [
+            SSH_EXECUTABLE,
+            "-i",
+            str(ssh_private_key),
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "StrictHostKeyChecking=accept-new",
+            f"{DEFAULT_ADMIN_USERNAME}@{vm_public_fqdn}",
+            remote_command,
+        ]
+        self._log(
+            cloud_name, f"Running SSH command on {vm_public_fqdn}: {remote_command}"
+        )
+        result = subprocess.run(
+            command,
+            cwd=REPO_ROOT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            capture_output=True,
+            check=True,
+        )
+        if result.stdout.strip():
+            self._log(cloud_name, result.stdout.strip())
+        if result.stderr.strip():
+            self._log(cloud_name, result.stderr.strip())
+        return result.stdout, result.stderr
+
+    def _validate_runtime_helper_script(self, cloud_name, vm_public_fqdn):
+        script_stdout, _ = self._run_ssh(
+            cloud_name,
+            vm_public_fqdn,
+            "sed -n '1,120p' /usr/local/bin/openclaw-approve-browser",
+        )
+        self.assertNotIn(
+            'gateway_url="ws://127.0.0.1:${OPENCLAW_GATEWAY_PORT}"', script_stdout
+        )
+        self.assertIn("device-pairing-*.js", script_stdout)
+        self.assertIn("PAIRING_LIST_JS_B64=", script_stdout)
+        self.assertIn("PAIRING_APPROVE_JS_B64=", script_stdout)
+        self.assertIn("OPENCLAW_REQUEST_ID:", script_stdout)
+        self.assertIn("printf '%s' \"$PAIRING_LIST_JS_B64\" | base64 -d", script_stdout)
+        self.assertIn(
+            "printf '%s' \"$PAIRING_APPROVE_JS_B64\" | base64 -d", script_stdout
+        )
+        self.assertNotIn("openclaw devices approve --latest", script_stdout)
+
+    def _validate_runtime_install_state(self, cloud_name, vm_public_fqdn):
+        runtime_stdout, _ = self._run_ssh(
+            cloud_name,
+            vm_public_fqdn,
+            (
+                "bash -lc '. /home/{user}/.openclaw-env.sh "
+                '&& printf "openclaw_path=%s\\n" "$(command -v openclaw)" '
+                '&& printf "npm_path=%s\\n" "$(command -v npm)" '
+                '&& printf "openclaw_version=%s\\n" "$(/usr/local/bin/openclaw --version | head -n 1)" '
+                '&& printf "node_version=%s\\n" "$(/home/{user}/.openclaw/tools/node/bin/node -v)" '
+                '&& printf "state_dir=%s\\n" "$OPENCLAW_STATE_DIR" '
+                '&& printf "config_path=%s\\n" "$OPENCLAW_CONFIG_PATH" '
+                '&& printf "compile_cache=%s\\n" "$NODE_COMPILE_CACHE" '
+                '&& printf "no_respawn=%s\\n" "$OPENCLAW_NO_RESPAWN" '
+                '&& printf "gateway_state=%s\\n" "$(systemctl --user is-active openclaw-gateway)" '
+                "&& test -f /home/{user}/.openclaw/lib/node_modules/openclaw/extensions/msteams/package.json "
+                "&& echo msteams_package_json=present'"
+            ).format(user=DEFAULT_ADMIN_USERNAME),
+        )
+        values = {}
+        for line in runtime_stdout.splitlines():
+            if "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            values[key.strip()] = value.strip()
+
+        self.assertEqual(
+            values.get("openclaw_path"),
+            f"/home/{DEFAULT_ADMIN_USERNAME}/.openclaw/bin/openclaw",
+        )
+        self.assertEqual(
+            values.get("npm_path"),
+            f"/home/{DEFAULT_ADMIN_USERNAME}/.openclaw/tools/node/bin/npm",
+        )
+        self.assertTrue(values.get("openclaw_version", "").startswith("OpenClaw "))
+        self.assertEqual(values.get("node_version"), "v24.14.0")
+        self.assertEqual(
+            values.get("state_dir"),
+            f"/home/{DEFAULT_ADMIN_USERNAME}/.openclaw",
+        )
+        self.assertEqual(
+            values.get("config_path"),
+            f"/home/{DEFAULT_ADMIN_USERNAME}/.openclaw/openclaw.json",
+        )
+        self.assertEqual(
+            values.get("compile_cache"),
+            f"/home/{DEFAULT_ADMIN_USERNAME}/.openclaw/cache/node-compile",
+        )
+        self.assertEqual(values.get("no_respawn"), "1")
+        self.assertEqual(values.get("gateway_state"), "active")
+        if self.env.get("TEST_MSTEAMS_APP_ID") and self.env.get(
+            "TEST_MSTEAMS_APP_PASSWORD"
+        ):
+            self.assertEqual(values.get("msteams_package_json"), "present")
+
+    def _validate_runtime_doctor_and_update_state(self, cloud_name, vm_public_fqdn):
+        doctor_stdout, doctor_stderr = self._run_ssh(
+            cloud_name,
+            vm_public_fqdn,
+            f"bash -lc '. /home/{DEFAULT_ADMIN_USERNAME}/.openclaw-env.sh && /usr/local/bin/openclaw doctor | cat'",
+        )
+        doctor_output = f"{doctor_stdout}\n{doctor_stderr}"
+        self.assertNotIn("NODE_COMPILE_CACHE is not set", doctor_output)
+        self.assertNotIn("OPENCLAW_NO_RESPAWN is not set to 1", doctor_output)
+        self.assertNotIn("Multiple state directories detected", doctor_output)
+
+        update_stdout, update_stderr = self._run_ssh(
+            cloud_name,
+            vm_public_fqdn,
+            f"bash -lc '. /home/{DEFAULT_ADMIN_USERNAME}/.openclaw-env.sh && /usr/local/bin/openclaw update --dry-run --yes --no-restart'",
+        )
+        update_output = f"{update_stdout}\n{update_stderr}"
+        self.assertNotIn("spawn npm ENOENT", update_output)
+
+    def _assert_devices_list_stable(self, cloud_name, vm_public_fqdn, attempts=5):
+        command = (
+            "bash -lc '. /home/{user}/.openclaw-env.sh && "
+            "ok=0; fail=0; "
+            "for i in $(seq 1 {attempts}); do "
+            "if /usr/local/bin/openclaw devices list --json >/tmp/devices-$i.out 2>&1; then ok=$((ok+1)); else fail=$((fail+1)); fi; "
+            'done; printf "ok=%s fail=%s\\n" "$ok" "$fail"; '
+            "for i in $(seq 1 {attempts}); do echo --- run $i ---; tail -n 12 /tmp/devices-$i.out; done'"
+        ).format(user=DEFAULT_ADMIN_USERNAME, attempts=attempts)
+        stdout, stderr = self._run_ssh(cloud_name, vm_public_fqdn, command)
+        combined_output = f"{stdout}\n{stderr}"
+        match = re.search(r"ok=(\d+) fail=(\d+)", combined_output)
+        if match is None:
+            self.fail(f"Missing stability counters in output: {combined_output}")
+        self.assertEqual(int(match.group(2)), 0, combined_output)
+
+    def _assert_no_pending_browser_pairing_request(self, cloud_name, vm_public_fqdn):
+        helper_stdout, helper_stderr = self._run_ssh(
+            cloud_name,
+            vm_public_fqdn,
+            "bash -lc 'openclaw-approve-browser'",
+        )
+        combined_output = f"{helper_stdout}\n{helper_stderr}"
+        self.assertIn(
+            "No pending browser pairing requests. Keep the dashboard page open on the pairing screen, wait a few seconds, and try again.",
+            combined_output,
+        )
+
+    def _extract_dashboard_url(self, command_output):
+        match = re.search(r"https://\S+#token=\S+", command_output)
+        if not match:
+            self.fail(f"Could not find a dashboard URL in output: {command_output}")
+        return match.group(0)
+
+    def _extract_json_payload(self, text, description):
+        start = text.find("{")
+        if start < 0:
+            self.fail(f"Could not find JSON payload in {description}: {text}")
+        payload, _ = json.JSONDecoder().raw_decode(text[start:])
+        return payload
+
+    def _list_devices_payload(self, cloud_name, vm_public_fqdn):
+        devices_stdout, devices_stderr = self._run_ssh(
+            cloud_name,
+            vm_public_fqdn,
+            f"bash -lc '. /home/{DEFAULT_ADMIN_USERNAME}/.openclaw-env.sh && /usr/local/bin/openclaw devices list --json'",
+        )
+        return self._extract_json_payload(
+            f"{devices_stdout}\n{devices_stderr}",
+            "openclaw devices list --json output",
+        )
+
+    def _matching_browser_devices(self, payload, state):
+        return [
+            item
+            for item in (payload.get(state) or [])
+            if (
+                str(item.get("clientId") or "") == "openclaw-control-ui"
+                or str(item.get("clientMode") or "") in ("webchat", "browser")
+            )
+        ]
+
+    def _validate_browser_pairing(self, cloud_name, vm_public_fqdn):
+        browser_url_stdout, browser_url_stderr = self._run_ssh(
+            cloud_name,
+            vm_public_fqdn,
+            "bash -lc 'openclaw-browser-url'",
+        )
+        dashboard_url = self._extract_dashboard_url(
+            f"{browser_url_stdout}\n{browser_url_stderr}"
+        )
+        self._log(
+            cloud_name,
+            f"Opening dashboard URL for browser pairing validation: {dashboard_url.split('#', 1)[0]}#token=***",
+        )
+
+        playwright_sync_api = self._get_playwright_sync_api()
+        playwright_error = playwright_sync_api.Error
+        sync_playwright = playwright_sync_api.sync_playwright
+
+        timeout_seconds = self._get_browser_pairing_timeout_seconds()
+        deadline = time.time() + timeout_seconds
+
+        try:
+            with sync_playwright() as playwright:
+                browser = playwright.chromium.launch(
+                    headless=self._use_headless_browser()
+                )
+                context = browser.new_context(ignore_https_errors=True)
+                page = context.new_page()
+                page.goto(dashboard_url, wait_until="domcontentloaded", timeout=30000)
+
+                pending_request_seen = False
+                while time.time() < deadline:
+                    page.wait_for_timeout(2000)
+                    devices_payload = self._list_devices_payload(
+                        cloud_name, vm_public_fqdn
+                    )
+                    if self._matching_browser_devices(devices_payload, "pending"):
+                        pending_request_seen = True
+                        break
+
+                self.assertTrue(
+                    pending_request_seen,
+                    "Timed out waiting for the browser page to create a pending pairing request.",
+                )
+
+                helper_stdout, helper_stderr = self._run_ssh(
+                    cloud_name,
+                    vm_public_fqdn,
+                    "bash -lc 'openclaw-approve-browser'",
+                )
+                combined_output = f"{helper_stdout}\n{helper_stderr}"
+                self.assertIn(
+                    "Approving browser pairing request:",
+                    combined_output,
+                )
+
+                paired_device_seen = False
+                while time.time() < deadline:
+                    page.wait_for_timeout(2000)
+                    devices_payload = self._list_devices_payload(
+                        cloud_name, vm_public_fqdn
+                    )
+                    if self._matching_browser_devices(devices_payload, "paired"):
+                        paired_device_seen = True
+                        break
+
+                self.assertTrue(
+                    paired_device_seen,
+                    "Timed out waiting for the approved browser device to enter the paired state.",
+                )
+
+                context.close()
+                browser.close()
+        except playwright_error as exc:
+            self.fail(
+                f"Browser pairing validation failed to drive the dashboard page: {exc}"
+            )
 
     def _write_deployment_metadata(self, cloud_name, metadata):
         persistent_output_dir = TEAMS_APP_PACKAGE_OUTPUT_DIR / cloud_name
@@ -262,14 +586,60 @@ class AzureIntegrationDeploymentTests(unittest.TestCase):
                 "list",
                 "--resource-group",
                 resource_group_name,
-                "--query",
-                "length(@)",
                 "--output",
-                "tsv",
+                "json",
             ],
             cloud_name,
         )
-        return int(resources_output.strip() or "0") > 0
+        return len(json.loads(resources_output)) > 0
+
+    def _resource_group_prefix(self):
+        return (
+            self.env.get("TEST_RESOURCE_GROUP_PREFIX", "openclawtest").strip()
+            or "openclawtest"
+        )
+
+    def _list_stale_resource_groups(self, cloud_name):
+        prefix = self._resource_group_prefix()
+        current_cloud_prefix = f"{prefix}-{cloud_name.lower()}-"
+        validate_prefix = f"{prefix}-validate-"
+        groups_output = run_az(["group", "list", "--output", "json"], cloud_name)
+        groups = json.loads(groups_output)
+        return sorted(
+            group["name"]
+            for group in groups
+            if group.get("name", "").startswith(current_cloud_prefix)
+            or group.get("name", "").startswith(validate_prefix)
+        )
+
+    def _delete_stale_resource_groups(self, cloud_name):
+        stale_groups = self._list_stale_resource_groups(cloud_name)
+        if not stale_groups:
+            self._log(cloud_name, "No stale integration-test resource groups found")
+            return
+
+        self._log(
+            cloud_name,
+            "Deleting stale integration-test resource groups before starting a new run: "
+            + ", ".join(stale_groups),
+        )
+        for group_name in stale_groups:
+            run_az(
+                [
+                    "group",
+                    "delete",
+                    "--name",
+                    group_name,
+                    "--yes",
+                    "--no-wait",
+                ],
+                cloud_name,
+            )
+        for group_name in stale_groups:
+            self._log(
+                cloud_name, f"Waiting for stale resource group {group_name} deletion"
+            )
+            self._wait_for_resource_group_deletion(cloud_name, group_name)
 
     def setUp(self):
         if self.env.get("TEST_RUN_INTEGRATION", "0") != "1":
@@ -280,6 +650,7 @@ class AzureIntegrationDeploymentTests(unittest.TestCase):
             self.skipTest(
                 "Set TEST_SSH_PUBLIC_KEY in .env before running integration tests."
             )
+        self._ensure_playwright_available()
 
     def _deploy_and_cleanup(self, cloud_name, location, subscription_id_env_key):
         self._log(cloud_name, "Checking Azure CLI login state")
@@ -293,11 +664,10 @@ class AzureIntegrationDeploymentTests(unittest.TestCase):
             run_az(["account", "set", "--subscription", subscription_id], cloud_name)
             self._log(cloud_name, "Subscription selected")
 
+        self._delete_stale_resource_groups(cloud_name)
+
         suffix = uuid.uuid4().hex[:8]
-        resource_group_prefix = (
-            self.env.get("TEST_RESOURCE_GROUP_PREFIX", "openclawtest").strip()
-            or "openclawtest"
-        )
+        resource_group_prefix = self._resource_group_prefix()
         resource_group_name = f"{resource_group_prefix}-{cloud_name.lower()}-{suffix}"
         vm_name = f"openclaw{suffix}"
         rg_created = False
@@ -424,6 +794,16 @@ class AzureIntegrationDeploymentTests(unittest.TestCase):
             self.assertTrue(vm_public_fqdn.endswith(expected_suffix))
             self.assertTrue(openclaw_public_url.startswith("https://"))
             self.assertIn(vm_name, vm_public_fqdn)
+            self._validate_runtime_helper_script(cloud_name, vm_public_fqdn)
+            self._validate_runtime_install_state(cloud_name, vm_public_fqdn)
+            self._validate_runtime_doctor_and_update_state(cloud_name, vm_public_fqdn)
+            self._assert_devices_list_stable(cloud_name, vm_public_fqdn)
+            if self._should_validate_browser_pairing():
+                self._validate_browser_pairing(cloud_name, vm_public_fqdn)
+            else:
+                self._assert_no_pending_browser_pairing_request(
+                    cloud_name, vm_public_fqdn
+                )
 
             extension_name = f"{vm_name}/openclaw-bootstrap"
             self._log(
