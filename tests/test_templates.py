@@ -619,6 +619,19 @@ class AzureDeployTemplateTests(unittest.TestCase):
 
     def test_ui_definition_contains_expected_steps_and_outputs(self):
         parameters = self.ui_definition["parameters"]
+        basics = parameters["basics"]
+        vm_size_element = next(
+            element for element in basics if element["name"] == "vmSize"
+        )
+        self.assertEqual(vm_size_element["type"], "Microsoft.Compute.SizeSelector")
+        self.assertEqual(vm_size_element["osPlatform"], "Linux")
+        self.assertEqual(vm_size_element["count"], 1)
+        self.assertEqual(
+            vm_size_element["recommendedSizes"],
+            ["Standard_B2as_v2", "Standard_D2as_v5", "Standard_D4as_v5"],
+        )
+        self.assertNotIn("constraints", vm_size_element)
+
         steps = parameters["steps"]
         step_names = [step["name"] for step in steps]
         self.assertEqual(step_names, ["openai", "feishu", "teams"])
@@ -633,6 +646,7 @@ class AzureDeployTemplateTests(unittest.TestCase):
         self.assertIn("msteamsAppPassword", teams_element_names)
 
         outputs = parameters["outputs"]
+        self.assertEqual(outputs["vmSize"], "[basics('vmSize')]")
         self.assertEqual(outputs["location"], "[location()]")
         self.assertEqual(outputs["feishuAppId"], "[steps('feishu').feishuAppId]")
         self.assertEqual(

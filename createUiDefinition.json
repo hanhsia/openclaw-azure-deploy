@@ -64,13 +64,16 @@
       },
       {
         "name": "vmSize",
-        "type": "Microsoft.Common.TextBox",
+        "type": "Microsoft.Compute.SizeSelector",
         "label": "VM Size",
-        "toolTip": "VM size for the personal deployment.",
-        "defaultValue": "Standard_B2as_v2",
-        "constraints": {
-          "required": true
-        }
+        "toolTip": "Choose the VM size for the OpenClaw host. The list is filtered by the selected region and Linux support.",
+        "recommendedSizes": [
+          "Standard_B2as_v2",
+          "Standard_D2as_v5",
+          "Standard_D4as_v5"
+        ],
+        "osPlatform": "Linux",
+        "count": 1
       },
       {
         "name": "dataDiskSizeGb",
