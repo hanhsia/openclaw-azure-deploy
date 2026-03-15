@@ -151,11 +151,12 @@ openclaw-browser-url
 openclaw-approve-browser
 ```
 该 helper 会直接读取本机的浏览器配对队列并批准最新的 Control UI 请求，不依赖 `openclaw devices list/approve` 这条 RPC 路径。如果脚本提示当前没有待处理的浏览器配对请求，请保持浏览器停留在配对页面，等待几秒后重试。
+补充说明：OpenClaw 上游 `2026.3.12` 到 `2026.3.13` 期间存在已知的 loopback WebSocket 握手回归，某些机器上 `openclaw devices list` 可能会报 `gateway closed (1000 normal closure): no close reason`，即使 `openclaw gateway status` 和 `openclaw gateway call device.pair.list --json --params "{}"` 仍然正常。这个 Azure 模板目前不内置 monkey patch，而是避开这条已知不稳定的 wrapper 路径，等待上游正式修复版本。
 然后返回浏览器刷新页面，即可正常使用 OpenClaw。
 
 ## 4. 后续升级
 
-这个模板会在虚拟机中使用**官方 `install-cli.sh` 安装器**安装 OpenClaw，并将 CLI 与专用 Node 运行时一起安装到 `adminUsername` 对应用户的 `~/.openclaw` 前缀下。当前模板固定使用最新稳定版 Node `24.14.0`，而不是依赖系统 `/usr` 下的全局 Node/npm。这样做既更接近 OpenClaw 官方推荐的无 root CLI 安装路径，也能让部署后的 SSH 管理员用户直接执行 `openclaw update`，避免因为 `/usr/lib/node_modules` 无写权限而失败。
+这个模板会在虚拟机中使用 OpenClaw 官方推荐的**非交互三步安装路径**：先运行**官方 `install-cli.sh` 安装器**把 CLI 与专用 Node 运行时装到 `adminUsername` 对应用户的 `~/.openclaw` 前缀下，再执行 `openclaw onboard --non-interactive --install-daemon` 完成 gateway 和托管服务安装，最后在同一个 bootstrap 脚本里通过 `openclaw config` 写入 Azure 传入的模型与 channel 配置。当前模板固定使用最新稳定版 Node `24.14.0`，而不是依赖系统 `/usr` 下的全局 Node/npm。这样做既更接近 OpenClaw 官方推荐的无 root CLI 安装路径，也能让部署后的 SSH 管理员用户直接执行 `openclaw update`，避免因为 `/usr/lib/node_modules` 无写权限而失败。
 
 部署完成后，如果你需要升级 OpenClaw，建议优先在虚拟机中执行：
 
@@ -169,6 +170,8 @@ openclaw gateway restart
 
 ```bash
 curl -fsSL https://openclaw.ai/install-cli.sh | bash -s -- --prefix "$HOME/.openclaw" --node-version 24.14.0 --no-onboard
+bash -lc 'openclaw onboard --non-interactive --accept-risk --mode local --workspace /data/workspace --auth-choice skip --gateway-port "$OPENCLAW_GATEWAY_PORT" --gateway-bind loopback --gateway-auth token --gateway-token-ref-env OPENCLAW_GATEWAY_TOKEN --install-daemon --daemon-runtime node --skip-channels --skip-skills'
+bash -lc 'openclaw config validate'
 openclaw doctor
 openclaw gateway restart
 ```
@@ -489,7 +492,7 @@ Then return to the browser and refresh the page to start using OpenClaw.
 
 ## 4. Updating Later
 
-This template installs OpenClaw with the **official `install-cli.sh` installer** and keeps both the CLI and its dedicated Node runtime under the `adminUsername` user's `~/.openclaw` prefix on the VM. The template currently pins the latest stable Node release, `24.14.0`, instead of depending on a system-wide `/usr` Node/npm install. That stays closer to the upstream no-root CLI installation path and still lets the SSH administrator user run `openclaw update` directly without hitting `EACCES` on `/usr/lib/node_modules`.
+This template uses OpenClaw's recommended **non-interactive three-step install path** on the VM: first the **official `install-cli.sh` installer** places the CLI and its dedicated Node runtime under the `adminUsername` user's `~/.openclaw` prefix, then `openclaw onboard --non-interactive --install-daemon` installs the local gateway service, and finally the same bootstrap script applies the Azure-provided model and channel settings through `openclaw config`. The template currently pins the latest stable Node release, `24.14.0`, instead of depending on a system-wide `/usr` Node/npm install. That stays closer to the upstream no-root CLI installation path and still lets the SSH administrator user run `openclaw update` directly without hitting `EACCES` on `/usr/lib/node_modules`.
 
 After deployment, when you want to upgrade OpenClaw on the VM, prefer:
 
@@ -503,6 +506,8 @@ If you want to rerun the installer explicitly instead, you can also run:
 
 ```bash
 curl -fsSL https://openclaw.ai/install-cli.sh | bash -s -- --prefix "$HOME/.openclaw" --node-version 24.14.0 --no-onboard
+bash -lc 'openclaw onboard --non-interactive --accept-risk --mode local --workspace /data/workspace --auth-choice skip --gateway-port "$OPENCLAW_GATEWAY_PORT" --gateway-bind loopback --gateway-auth token --gateway-token-ref-env OPENCLAW_GATEWAY_TOKEN --install-daemon --daemon-runtime node --skip-channels --skip-skills'
+bash -lc 'openclaw config validate'
 openclaw doctor
 openclaw gateway restart
 ```
@@ -654,6 +659,7 @@ Keep the browser page open, switch back to the SSH terminal on the virtual machi
 openclaw-approve-browser
 ```
 The helper reads the local browser pairing queue directly and approves the newest Control UI request without depending on the `openclaw devices list/approve` RPC path. If it reports that there is no pending browser pairing request yet, leave the browser on the pairing screen, wait a few seconds, and rerun it.
+Known upstream note: OpenClaw `2026.3.12` through `2026.3.13` has a reported loopback WebSocket handshake regression on some hosts. In that window, `openclaw devices list` can fail with `gateway closed (1000 normal closure): no close reason` even while `openclaw gateway status` and `openclaw gateway call device.pair.list --json --params "{}"` still succeed. This Azure template does not bake in a runtime monkey patch for that upstream bug; it avoids depending on the unstable wrapper path until an upstream release ships the fix.
 After the command finishes, refresh the browser page to enter the dashboard.
 
 ### 6. The browser shows `502 Bad Gateway`

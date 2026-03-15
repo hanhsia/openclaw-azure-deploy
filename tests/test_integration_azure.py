@@ -263,8 +263,8 @@ class AzureIntegrationDeploymentTests(unittest.TestCase):
             cloud_name,
             vm_public_fqdn,
             (
-                "bash -lc '. /home/{user}/.openclaw-env.sh "
-                '&& printf "openclaw_path=%s\\n" "$(command -v openclaw)" '
+                "bash -lc '"
+                'printf "openclaw_path=%s\\n" "$(command -v openclaw)" '
                 '&& printf "npm_path=%s\\n" "$(command -v npm)" '
                 '&& printf "openclaw_version=%s\\n" "$(/usr/local/bin/openclaw --version | head -n 1)" '
                 '&& printf "node_version=%s\\n" "$(/home/{user}/.openclaw/tools/node/bin/node -v)" '
@@ -272,10 +272,16 @@ class AzureIntegrationDeploymentTests(unittest.TestCase):
                 '&& printf "config_path=%s\\n" "$OPENCLAW_CONFIG_PATH" '
                 '&& printf "compile_cache=%s\\n" "$NODE_COMPILE_CACHE" '
                 '&& printf "no_respawn=%s\\n" "$OPENCLAW_NO_RESPAWN" '
-                '&& runtime_npm_root="$(/home/{user}/.openclaw/tools/node/bin/npm root -g)" '
-                '&& printf "runtime_package_dir=%s\\n" "$runtime_npm_root/openclaw" '
-                '&& if test -f "$runtime_npm_root/openclaw/extensions/msteams/package.json"; then echo runtime_msteams_package_json=present; else echo runtime_msteams_package_json=missing; fi '
-                '&& if test -d "$runtime_npm_root/openclaw/extensions/msteams/node_modules/@microsoft/agents-hosting"; then echo runtime_msteams_agents_hosting=present; else echo runtime_msteams_agents_hosting=missing; fi '
+                '&& install_package_dir="/home/{user}/.openclaw/lib/node_modules/openclaw" '
+                '&& printf "install_package_dir=%s\\n" "$install_package_dir" '
+                '&& gateway_entrypoint="$(sed -n "s/^ExecStart=//p" "$HOME/.config/systemd/user/openclaw-gateway.service" | head -n 1 | awk ''{{print $2}}'')" '
+                '&& printf "gateway_entrypoint=%s\\n" "$gateway_entrypoint" '
+                '&& gateway_package_dir="$(dirname "$(dirname "$gateway_entrypoint")")" '
+                '&& printf "gateway_package_dir=%s\\n" "$gateway_package_dir" '
+                '&& if test -f "$install_package_dir/extensions/msteams/package.json"; then echo runtime_msteams_package_json=present; else echo runtime_msteams_package_json=missing; fi '
+                '&& if test -d "$install_package_dir/extensions/msteams/node_modules/@microsoft/agents-hosting"; then echo runtime_msteams_agents_hosting=present; else echo runtime_msteams_agents_hosting=missing; fi '
+                '&& if test -d "$gateway_package_dir/extensions/msteams/node_modules/@microsoft/agents-hosting"; then echo gateway_msteams_agents_hosting=present; else echo gateway_msteams_agents_hosting=missing; fi '
+                '&& if test -d "$gateway_package_dir/extensions/feishu/node_modules/@larksuiteoapi/node-sdk"; then echo gateway_feishu_node_sdk=present; else echo gateway_feishu_node_sdk=missing; fi '
                 '&& printf "gateway_state=%s\\n" "$(systemctl --user is-active openclaw-gateway)" '
                 "'"
             ).format(user=DEFAULT_ADMIN_USERNAME),
@@ -311,10 +317,14 @@ class AzureIntegrationDeploymentTests(unittest.TestCase):
         )
         self.assertEqual(values.get("no_respawn"), "1")
         self.assertEqual(
-            values.get("runtime_package_dir"),
-            "/data/tools/node-v24.14.0/lib/node_modules/openclaw",
+            values.get("install_package_dir"),
+            f"/home/{DEFAULT_ADMIN_USERNAME}/.openclaw/lib/node_modules/openclaw",
         )
+        self.assertTrue(values.get("gateway_entrypoint", "").endswith("/dist/entry.js"))
+        self.assertTrue(values.get("gateway_package_dir", "").endswith("/openclaw"))
         self.assertEqual(values.get("gateway_state"), "active")
+        if self.env.get("TEST_FEISHU_APP_ID") and self.env.get("TEST_FEISHU_APP_SECRET"):
+            self.assertEqual(values.get("gateway_feishu_node_sdk"), "present")
         if self.env.get("TEST_MSTEAMS_APP_ID") and self.env.get(
             "TEST_MSTEAMS_APP_PASSWORD"
         ):
@@ -323,12 +333,13 @@ class AzureIntegrationDeploymentTests(unittest.TestCase):
                 values.get("runtime_msteams_agents_hosting"),
                 "present",
             )
+            self.assertEqual(values.get("gateway_msteams_agents_hosting"), "present")
 
     def _validate_runtime_doctor_and_update_state(self, cloud_name, vm_public_fqdn):
         doctor_stdout, doctor_stderr = self._run_ssh(
             cloud_name,
             vm_public_fqdn,
-            f"bash -lc '. /home/{DEFAULT_ADMIN_USERNAME}/.openclaw-env.sh && /usr/local/bin/openclaw doctor | cat'",
+            "bash -lc '/usr/local/bin/openclaw doctor | cat'",
         )
         doctor_output = f"{doctor_stdout}\n{doctor_stderr}"
         self.assertNotIn("NODE_COMPILE_CACHE is not set", doctor_output)
@@ -338,20 +349,20 @@ class AzureIntegrationDeploymentTests(unittest.TestCase):
         update_stdout, update_stderr = self._run_ssh(
             cloud_name,
             vm_public_fqdn,
-            f"bash -lc '. /home/{DEFAULT_ADMIN_USERNAME}/.openclaw-env.sh && /usr/local/bin/openclaw update --dry-run --yes --no-restart'",
+            "bash -lc '/usr/local/bin/openclaw update --dry-run --yes --no-restart'",
         )
         update_output = f"{update_stdout}\n{update_stderr}"
         self.assertNotIn("spawn npm ENOENT", update_output)
 
-    def _assert_devices_list_stable(self, cloud_name, vm_public_fqdn, attempts=5):
+    def _assert_pairing_rpc_stable(self, cloud_name, vm_public_fqdn, attempts=5):
         command = (
-            "bash -lc '. /home/{user}/.openclaw-env.sh && "
+            "bash -lc '"
             "ok=0; fail=0; "
             "for i in $(seq 1 {attempts}); do "
-            "if /usr/local/bin/openclaw devices list --json >/tmp/devices-$i.out 2>&1; then ok=$((ok+1)); else fail=$((fail+1)); fi; "
+            "if /usr/local/bin/openclaw gateway call device.pair.list --json --params \"{}\" >/tmp/device-pair-list-$i.out 2>&1; then ok=$((ok+1)); else fail=$((fail+1)); fi; "
             'done; printf "ok=%s fail=%s\\n" "$ok" "$fail"; '
-            "for i in $(seq 1 {attempts}); do echo --- run $i ---; tail -n 12 /tmp/devices-$i.out; done'"
-        ).format(user=DEFAULT_ADMIN_USERNAME, attempts=attempts)
+            "for i in $(seq 1 {attempts}); do echo --- run $i ---; tail -n 12 /tmp/device-pair-list-$i.out; done'"
+        ).format(attempts=attempts)
         stdout, stderr = self._run_ssh(cloud_name, vm_public_fqdn, command)
         combined_output = f"{stdout}\n{stderr}"
         match = re.search(r"ok=(\d+) fail=(\d+)", combined_output)
@@ -384,15 +395,15 @@ class AzureIntegrationDeploymentTests(unittest.TestCase):
         payload, _ = json.JSONDecoder().raw_decode(text[start:])
         return payload
 
-    def _list_devices_payload(self, cloud_name, vm_public_fqdn):
+    def _list_pairing_payload(self, cloud_name, vm_public_fqdn):
         devices_stdout, devices_stderr = self._run_ssh(
             cloud_name,
             vm_public_fqdn,
-            f"bash -lc '. /home/{DEFAULT_ADMIN_USERNAME}/.openclaw-env.sh && /usr/local/bin/openclaw devices list --json'",
+            "bash -lc '/usr/local/bin/openclaw gateway call device.pair.list --json --params " + r'"{}"' + "'",
         )
         return self._extract_json_payload(
             f"{devices_stdout}\n{devices_stderr}",
-            "openclaw devices list --json output",
+            "openclaw gateway call device.pair.list --json output",
         )
 
     def _matching_browser_devices(self, payload, state):
@@ -438,7 +449,7 @@ class AzureIntegrationDeploymentTests(unittest.TestCase):
                 pending_request_seen = False
                 while time.time() < deadline:
                     page.wait_for_timeout(2000)
-                    devices_payload = self._list_devices_payload(
+                    devices_payload = self._list_pairing_payload(
                         cloud_name, vm_public_fqdn
                     )
                     if self._matching_browser_devices(devices_payload, "pending"):
@@ -464,7 +475,7 @@ class AzureIntegrationDeploymentTests(unittest.TestCase):
                 paired_device_seen = False
                 while time.time() < deadline:
                     page.wait_for_timeout(2000)
-                    devices_payload = self._list_devices_payload(
+                    devices_payload = self._list_pairing_payload(
                         cloud_name, vm_public_fqdn
                     )
                     if self._matching_browser_devices(devices_payload, "paired"):
@@ -808,7 +819,7 @@ class AzureIntegrationDeploymentTests(unittest.TestCase):
             self._validate_runtime_helper_script(cloud_name, vm_public_fqdn)
             self._validate_runtime_install_state(cloud_name, vm_public_fqdn)
             self._validate_runtime_doctor_and_update_state(cloud_name, vm_public_fqdn)
-            self._assert_devices_list_stable(cloud_name, vm_public_fqdn)
+            self._assert_pairing_rpc_stable(cloud_name, vm_public_fqdn)
             if self._should_validate_browser_pairing():
                 self._validate_browser_pairing(cloud_name, vm_public_fqdn)
             else:

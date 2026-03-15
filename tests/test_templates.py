@@ -8,9 +8,9 @@ from scripts.sync_bootstrap_script import (
     DEFAULT_ARM_STRING_PATH,
     HELPER_TEMPLATE_PATHS,
     build_bootstrap_expression,
-    build_openclaw_config_review,
     extract_arm_format_string,
     extract_embedded_script,
+    validate_arm_format_literal,
 )
 
 
@@ -53,7 +53,6 @@ class AzureDeployTemplateTests(unittest.TestCase):
     def setUpClass(cls):
         cls.template = load_json("azuredeploy.json")
         cls.ui_definition = load_json("createUiDefinition.json")
-        cls.openclaw_config_template = load_json("openclawConfig.template.json")
         cls.teams_manifest_template = (
             REPO_ROOT / "teams-app-package" / "manifest.template.json"
         ).read_text(encoding="utf-8")
@@ -165,63 +164,21 @@ class AzureDeployTemplateTests(unittest.TestCase):
             variables["botServiceName"],
         )
 
-    def test_openclaw_config_template_contains_channel_placeholders_and_trusted_proxies(
-        self,
-    ):
-        channels = self.openclaw_config_template["channels"]
-        self.assertIn("feishu", channels)
-        self.assertEqual(channels["feishu"]["accounts"]["default"]["dmPolicy"], "open")
-        self.assertEqual(
-            channels["feishu"]["accounts"]["default"]["groupPolicy"], "open"
-        )
-        self.assertEqual(channels["feishu"]["accounts"]["default"]["allowFrom"], ["*"])
-        self.assertEqual(
-            channels["feishu"]["accounts"]["main"]["appId"], "${FEISHU_APP_ID}"
-        )
-        self.assertEqual(
-            channels["feishu"]["accounts"]["main"]["appSecret"],
-            "${FEISHU_APP_SECRET}",
-        )
-        self.assertIn("msteams", channels)
-        self.assertEqual(channels["msteams"]["appId"], "${MSTEAMS_APP_ID}")
-        self.assertEqual(channels["msteams"]["appPassword"], "${MSTEAMS_APP_PASSWORD}")
-        self.assertEqual(channels["msteams"]["dmPolicy"], "pairing")
-        self.assertEqual(channels["msteams"]["groupPolicy"], "open")
-        self.assertEqual(channels["msteams"]["tenantId"], "[subscription().tenantId]")
-        gateway = self.openclaw_config_template["gateway"]
-        self.assertNotIn("trustedProxies", gateway)
-
-    def test_openclaw_config_review_file_is_in_sync(self):
-        self.assertEqual(
-            self.openclaw_config_template,
-            build_openclaw_config_review(self.template),
-        )
-
-    def test_feishu_channel_defaults_to_open_dm(self):
-        feishu_json = self.template["variables"]["openclawFeishuJson"]
-        self.assertIn('"main": {', feishu_json)
-        self.assertIn('"default": {', feishu_json)
-        self.assertIn('"dmPolicy": "open"', feishu_json)
-        self.assertIn('"groupPolicy": "open"', feishu_json)
-        self.assertIn('"allowFrom": ["*"]', feishu_json)
-        self.assertNotIn('"dmPolicy": "pairing"', feishu_json)
-
-    def test_msteams_channel_defaults_to_open_group_policy(self):
-        msteams_json = self.template["variables"]["openclawMsTeamsJson"]
-        self.assertIn('"dmPolicy": "pairing"', msteams_json)
-        self.assertIn('"groupPolicy": "open"', msteams_json)
-        self.assertNotIn('"groupPolicy": "allowlist"', msteams_json)
-
-    def test_channel_fragments_do_not_duplicate_channels_wrapper(self):
+    def test_arm_template_no_longer_generates_openclaw_config(self):
         variables = self.template["variables"]
-        self.assertNotIn('  "channels": {', variables["openclawFeishuJson"])
-        self.assertNotIn('  "channels": {', variables["openclawMsTeamsJson"])
-        self.assertIn('    "feishu": {', variables["openclawFeishuJson"])
-        self.assertIn('    "msteams": {', variables["openclawMsTeamsJson"])
+        self.assertNotIn("openclawDefaultModelJson", variables)
+        self.assertNotIn("openclawModelsJson", variables)
+        self.assertNotIn("openclawFeishuJson", variables)
+        self.assertNotIn("openclawMsTeamsJson", variables)
+        self.assertNotIn("openclawChannelsOpen", variables)
+        self.assertNotIn("openclawChannelSeparator", variables)
+        self.assertNotIn("openclawChannelsClose", variables)
+        self.assertNotIn("openclawConfig", variables)
+        self.assertNotIn("openclawConfigBase64", variables)
 
     def test_bootstrap_script_exports_feishu_credentials(self):
-        self.assertIn("FEISHU_APP_ID={6}", self.bootstrap_script)
-        self.assertIn("FEISHU_APP_SECRET={7}", self.bootstrap_script)
+        self.assertIn("OPENCLAW_FEISHU_APP_ID='{6}'", self.bootstrap_script)
+        self.assertIn("OPENCLAW_FEISHU_APP_SECRET='{7}'", self.bootstrap_script)
         self.assertIn("OPENCLAW_STATE_DIR=/home/{5}/.openclaw", self.bootstrap_script)
         self.assertIn(
             "OPENCLAW_CONFIG_PATH=/home/{5}/.openclaw/openclaw.json",
@@ -231,10 +188,7 @@ class AzureDeployTemplateTests(unittest.TestCase):
         self.assertIn(
             "set -a\n  . /etc/openclaw/openclaw.env\n  set +a", self.bootstrap_script
         )
-        self.assertIn(
-            ". /home/{5}/.openclaw-env.sh && exec /usr/local/bin/openclaw",
-            self.bootstrap_script,
-        )
+        self.assertNotIn(".openclaw-env.sh", self.bootstrap_script)
 
     def test_bootstrap_script_exports_msteams_credentials_and_installs_bundled_dependencies(
         self,
@@ -244,9 +198,9 @@ class AzureDeployTemplateTests(unittest.TestCase):
         self.assertIn("set -eux\n", self.bootstrap_script)
         self.assertNotIn("set -euxo pipefail", self.bootstrap_script)
 
-        self.assertIn("MSTEAMS_APP_ID={8}", self.bootstrap_script)
-        self.assertIn("MSTEAMS_APP_PASSWORD={9}", self.bootstrap_script)
-        self.assertIn("MSTEAMS_TENANT_ID={10}", self.bootstrap_script)
+        self.assertIn("OPENCLAW_MSTEAMS_APP_ID='{8}'", self.bootstrap_script)
+        self.assertIn("OPENCLAW_MSTEAMS_APP_PASSWORD='{9}'", self.bootstrap_script)
+        self.assertIn("OPENCLAW_MSTEAMS_TENANT_ID='{10}'", self.bootstrap_script)
         self.assertIn("openclaw-approve-teams-pairing", self.bootstrap_script)
         self.assertIn(
             'git config --global --add url."https://github.com/".insteadOf ssh://git@github.com/',
@@ -290,31 +244,71 @@ class AzureDeployTemplateTests(unittest.TestCase):
             self.bootstrap_script,
         )
         self.assertIn(
-            'OPENCLAW_RUNTIME_NODE_MODULES_DIR="$(sudo -u {5} bash -lc \'export PATH="$(dirname "$1"):$PATH" && "$1" root -g\' _ "$OPENCLAW_NPM_BIN")"',
+            'OPENCLAW_INSTALL_PACKAGE_DIR="$OPENCLAW_INSTALL_PREFIX/lib/node_modules/openclaw"',
             self.bootstrap_script,
         )
         self.assertIn(
-            'OPENCLAW_RUNTIME_PACKAGE_DIR="$OPENCLAW_RUNTIME_NODE_MODULES_DIR/openclaw"',
+            "OpenClaw install package directory was not found after install-cli.sh completed: $OPENCLAW_INSTALL_PACKAGE_DIR",
             self.bootstrap_script,
         )
         self.assertIn(
-            'OPENCLAW_MSTEAMS_DIR="$OPENCLAW_RUNTIME_PACKAGE_DIR/extensions/msteams"',
+            "install_openclaw_extension_dependencies() {",
             self.bootstrap_script,
         )
         self.assertIn(
-            'sudo -u {5} bash -lc \'export PATH="$(dirname "$1"):$PATH" && "$1" install --omit=dev --prefix "$2"\' _ "$OPENCLAW_NPM_BIN" "$OPENCLAW_MSTEAMS_DIR"',
+            "resolve_gateway_service_entrypoint_path() {",
             self.bootstrap_script,
         )
         self.assertIn(
+            "OpenClaw bundled extension package was not found at $extension_dir",
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            'if ! grep -q \'"dependencies"[[:space:]]*:\' "$extension_dir/package.json"; then',
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            'sudo -u {5} bash -lc \'export PATH="$(dirname "$1"):$PATH" && "$1" install --omit=dev --prefix "$2"\' _ "$OPENCLAW_NPM_BIN" "$extension_dir"',
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            'OPENCLAW_CONFIGURED_BUNDLED_EXTENSIONS="$OPENCLAW_CONFIGURED_BUNDLED_EXTENSIONS feishu"',
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            'OPENCLAW_CONFIGURED_BUNDLED_EXTENSIONS="$OPENCLAW_CONFIGURED_BUNDLED_EXTENSIONS msteams"',
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            'OPENCLAW_GATEWAY_SERVICE_UNIT="/home/{5}/.config/systemd/user/openclaw-gateway.service"',
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            'OPENCLAW_GATEWAY_ENTRYPOINT="$(resolve_gateway_service_entrypoint_path "$OPENCLAW_GATEWAY_SERVICE_UNIT")"',
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            'OPENCLAW_GATEWAY_PACKAGE_DIR="$(dirname "$(dirname "$OPENCLAW_GATEWAY_ENTRYPOINT")")"',
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            'OPENCLAW_PACKAGE_DIRS="$OPENCLAW_INSTALL_PACKAGE_DIR"',
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            'install_openclaw_extension_dependencies "$OPENCLAW_PACKAGE_DIR" "$OPENCLAW_EXTENSION_ID"',
+            self.bootstrap_script,
+        )
+        self.assertNotIn(
+            'OPENCLAW_MSTEAMS_DIR="$OPENCLAW_INSTALL_PACKAGE_DIR/extensions/msteams"',
+            self.bootstrap_script,
+        )
+        self.assertNotIn(
             "OpenClaw MSTeams plugin package was not found at $OPENCLAW_MSTEAMS_DIR",
             self.bootstrap_script,
         )
         self.assertIn(
             "OpenClaw npm binary was not found after install-cli.sh completed: $OPENCLAW_NPM_BIN",
-            self.bootstrap_script,
-        )
-        self.assertIn(
-            "OpenClaw runtime package directory was not found after install-cli.sh completed: $OPENCLAW_RUNTIME_PACKAGE_DIR",
             self.bootstrap_script,
         )
         self.assertIn(
@@ -336,9 +330,38 @@ class AzureDeployTemplateTests(unittest.TestCase):
             self.bootstrap_script,
         )
         self.assertIn(
-            ". /home/{5}/.openclaw-env.sh && exec /usr/local/bin/openclaw gateway install --runtime node --force --json",
+            "bash -lc 'systemctl --user import-environment HOME OPENCLAW_STATE_DIR OPENCLAW_CONFIG_PATH OPENCLAW_GATEWAY_PORT OPENCLAW_GATEWAY_TOKEN OPENCLAW_PUBLIC_URL PATH NODE_COMPILE_CACHE OPENCLAW_NO_RESPAWN'",
             self.bootstrap_script,
         )
+        self.assertIn(
+            "bash -lc 'exec /usr/local/bin/openclaw onboard --non-interactive --accept-risk --mode local --workspace /data/workspace --auth-choice skip --gateway-port \"$OPENCLAW_GATEWAY_PORT\" --gateway-bind loopback --gateway-auth token --gateway-token-ref-env OPENCLAW_GATEWAY_TOKEN --install-daemon --daemon-runtime node --skip-channels --skip-skills --json'",
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            "run_openclaw_config_json gateway.controlUi.enabled true",
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            'run_openclaw_config_json gateway.controlUi.allowedOrigins "$OPENCLAW_ALLOWED_ORIGINS_JSON"',
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            'run_openclaw_config_string channels.feishu.accounts.main.appId "$OPENCLAW_FEISHU_APP_ID"',
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            'run_openclaw_config_string channels.msteams.appId "$OPENCLAW_MSTEAMS_APP_ID"',
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            "OPENCLAW_AZURE_OPENAI_PROVIDER_JSON=$(cat <<EOF",
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            'run_openclaw_config_json models.providers.openai "$OPENCLAW_AZURE_OPENAI_PROVIDER_JSON"',
+            self.bootstrap_script,
+        )
+        self.assertNotIn(".openclaw-env.sh", arm_bootstrap_script)
         self.assertIn(
             "systemctl --user is-active openclaw-gateway",
             self.bootstrap_script,
@@ -429,10 +452,11 @@ class AzureDeployTemplateTests(unittest.TestCase):
             "openclaw plugins install @openclaw/msteams", self.bootstrap_script
         )
         self.assertNotIn("/data/extensions/msteams", arm_bootstrap_script)
-        self.assertIn(
+        self.assertNotIn(
             "printf '%s' '{2}' | base64 -d > /home/{5}/.openclaw/openclaw.json",
             self.bootstrap_script,
         )
+        self.assertIn("OPENCLAW_ALLOWED_ORIGINS_JSON='{13}'", self.bootstrap_script)
         self.assertIn(
             "Environment=PATH=/home/{5}/.openclaw/tools/node/bin:/home/{5}/.openclaw/bin:/usr/local/bin:/usr/bin:/bin",
             self.bootstrap_script,
@@ -457,12 +481,12 @@ class AzureDeployTemplateTests(unittest.TestCase):
             "PAIRING_LIST_JS_B64=",
             format_string,
         )
-        self.assertIn(
-            "printf '%s' '{2}' | base64 -d > /home/{5}/.openclaw/openclaw.json",
-            format_string,
-        )
+        self.assertIn("OPENCLAW_ALLOWED_ORIGINS_JSON='{13}'", format_string)
+        self.assertIn("run_openclaw_config_string() {{", format_string)
 
-        for match in re.finditer(r"\{([^{}]+)\}", format_string):
+        validate_arm_format_literal(format_string)
+
+        for match in re.finditer(r"(?<!\{)\{([^{}]+)\}(?!\})", format_string):
             self.assertRegex(match.group(1), r"^\d+$")
 
     def test_generated_bootstrap_artifacts_are_in_sync(self):
@@ -475,10 +499,6 @@ class AzureDeployTemplateTests(unittest.TestCase):
         self.assertNotIn("# ARM format placeholders:", self.expected_arm_expression)
         self.assertTrue(
             self.expected_arm_expression.startswith("[format('#!/usr/bin/env bash")
-        )
-        self.assertEqual(
-            DEFAULT_ARM_STRING_PATH.read_text(encoding="utf-8").strip(),
-            self.expected_arm_string_literal,
         )
         self.assertEqual(
             DEFAULT_ARM_EXPRESSION_PATH.read_text(encoding="utf-8").strip(),
@@ -506,6 +526,9 @@ class AzureDeployTemplateTests(unittest.TestCase):
         self.assertIn("openclaw update", self.readme)
         self.assertIn("install-cli.sh", self.readme)
         self.assertIn("official `install-cli.sh` installer", self.readme)
+        self.assertIn("onboard --non-interactive", self.readme)
+        self.assertIn("--install-daemon", self.readme)
+        self.assertIn("openclaw config", self.readme)
 
     def test_local_teams_app_package_template_exists(self):
         build_script = REPO_ROOT / "teams-app-package" / "build-app-package.ps1"

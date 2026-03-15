@@ -15,7 +15,6 @@ DEFAULT_ARM_EXPRESSION_PATH = (
     REPO_ROOT / "generated" / "bootstrapScript.arm-expression.txt"
 )
 DEFAULT_AZUREDEPLOY_PATH = REPO_ROOT / "azuredeploy.json"
-DEFAULT_OPENCLAW_CONFIG_TEMPLATE_PATH = REPO_ROOT / "openclawConfig.template.json"
 
 HELPER_TEMPLATE_PATHS = {
     "openclaw-browser-url": REPO_ROOT / "openclaw-browser-url.template.sh",
@@ -30,63 +29,18 @@ HELPER_TEMPLATE_MARKERS = {
     "openclaw-approve-teams-pairing": "__OPENCLAW_APPROVE_TEAMS_PAIRING_TEMPLATE__",
 }
 
-OPENCLAW_CONFIG_REVIEW_NOTE = (
-    "Extracted from azuredeploy.json variables.openclawConfig for easier review."
-)
-
-OPENCLAW_CONFIG_ARM_PLACEHOLDERS = {
-    "variables('openclawDefaultModelJson')": (
-        "Optional JSON fragment injected when Azure OpenAI is configured"
-    ),
-    "variables('openclawModelsJson')": (
-        "Optional JSON fragment injected when Azure OpenAI is configured"
-    ),
-    "variables('openclawFeishuJson')": (
-        "Optional JSON fragment injected when Feishu is configured"
-    ),
-    "variables('openclawMsTeamsJson')": (
-        "Optional JSON fragment injected when Microsoft Teams is configured"
-    ),
-    "variables('openclawPort')": "Gateway port number",
-    "variables('msteamsPort')": "Webhook listener port for Microsoft Teams",
-    "variables('msteamsWebhookPath')": "Webhook path for Microsoft Teams",
-    "variables('allowedOriginsJson')": (
-        "JSON array string for allowed dashboard origins"
-    ),
-    "${OPENCLAW_GATEWAY_TOKEN}": (
-        "Runtime environment variable from /etc/openclaw/openclaw.env"
-    ),
-    "${FEISHU_APP_ID}": (
-        "Runtime environment variable from /etc/openclaw/openclaw.env"
-    ),
-    "${FEISHU_APP_SECRET}": (
-        "Runtime environment variable from /etc/openclaw/openclaw.env"
-    ),
-    "${MSTEAMS_APP_ID}": (
-        "Runtime environment variable from /etc/openclaw/openclaw.env"
-    ),
-    "${MSTEAMS_APP_PASSWORD}": (
-        "Runtime environment variable from /etc/openclaw/openclaw.env"
-    ),
-}
-
-OPENCLAW_CONFIG_TEMPLATE_FRAGMENTS = {
-    "afterAgentsDefaults": "variables('openclawDefaultModelJson')",
-    "afterAgentsObject": "variables('openclawModelsJson')",
-    "beforeGateway": (
-        "variables('openclawFeishuJson') and variables('openclawMsTeamsJson')"
-    ),
-}
+ARM_PLACEHOLDER_RE = re.compile(r"\{(\d+)\}")
 
 
 def _arm_format_arguments() -> str:
     return (
-        ", string(variables('openclawPort')), parameters('azureOpenAiApiKey'),"
-        " variables('openclawConfigBase64'), variables('caddyConfigBase64'),"
-        " variables('publicControlUrl'), parameters('adminUsername'),"
-        " parameters('feishuAppId'), parameters('feishuAppSecret'),"
-        " parameters('msteamsAppId'), parameters('msteamsAppPassword'),"
-        " variables('msteamsTenantId'))]"
+        ", string(variables('openclawPort')), parameters('azureOpenAiApiKey'), ''"
+        ", variables('caddyConfigBase64'), variables('publicControlUrl')"
+        ", parameters('adminUsername'), parameters('feishuAppId')"
+        ", parameters('feishuAppSecret'), parameters('msteamsAppId')"
+        ", parameters('msteamsAppPassword'), variables('msteamsTenantId')"
+        ", parameters('azureOpenAiEndpoint'), parameters('azureOpenAiDeployment')"
+        ", variables('allowedOriginsJson'))]"
     )
 
 
@@ -109,6 +63,52 @@ def validate_template_placeholders(template_text: str) -> None:
             raise ValueError(
                 f"Unsupported ARM format placeholder {{{match.group(1)}}} in bootstrap template."
             )
+
+
+def escape_arm_format_literal(template_text: str) -> str:
+    chars: list[str] = []
+    index = 0
+    while index < len(template_text):
+        if match := ARM_PLACEHOLDER_RE.match(template_text, index):
+            chars.append(match.group(0))
+            index = match.end()
+            continue
+
+        char = template_text[index]
+        if char == "{":
+            chars.append("{{")
+        elif char == "}":
+            chars.append("}}")
+        else:
+            chars.append(char)
+        index += 1
+
+    return "".join(chars)
+
+
+def validate_arm_format_literal(format_text: str) -> None:
+    index = 0
+    while index < len(format_text):
+        if match := ARM_PLACEHOLDER_RE.match(format_text, index):
+            index = match.end()
+            continue
+
+        char = format_text[index]
+        if char == "{":
+            if index + 1 < len(format_text) and format_text[index + 1] == "{":
+                index += 2
+                continue
+            raise ValueError(
+                f"Invalid ARM format literal '{{' at offset {index}; literal braces must be escaped."
+            )
+        if char == "}":
+            if index + 1 < len(format_text) and format_text[index + 1] == "}":
+                index += 2
+                continue
+            raise ValueError(
+                f"Invalid ARM format literal '}}' at offset {index}; literal braces must be escaped."
+            )
+        index += 1
 
 
 def validate_shell_syntax(template_path: Path) -> None:
@@ -217,80 +217,14 @@ def extract_embedded_script(bootstrap_text: str, script_name: str) -> str:
     return bootstrap_text[start:end] + "\n"
 
 
-def build_openclaw_config_review(azuredeploy_payload: dict) -> dict:
-    variables = azuredeploy_payload["variables"]
-    return {
-        "_note": OPENCLAW_CONFIG_REVIEW_NOTE,
-        "_armPlaceholders": OPENCLAW_CONFIG_ARM_PLACEHOLDERS,
-        "_templateFragments": OPENCLAW_CONFIG_TEMPLATE_FRAGMENTS,
-        "agents": {
-            "defaults": {
-                "workspace": "/data/workspace",
-            }
-        },
-        "channels": {
-            "feishu": {
-                "enabled": True,
-                "accounts": {
-                    "main": {
-                        "appId": "${FEISHU_APP_ID}",
-                        "appSecret": "${FEISHU_APP_SECRET}",
-                    },
-                    "default": {
-                        "dmPolicy": "open",
-                        "groupPolicy": "open",
-                        "allowFrom": ["*"],
-                    },
-                },
-            },
-            "msteams": {
-                "enabled": True,
-                "appId": "${MSTEAMS_APP_ID}",
-                "appPassword": "${MSTEAMS_APP_PASSWORD}",
-                "dmPolicy": "pairing",
-                "groupPolicy": "open",
-                "tenantId": variables["msteamsTenantId"],
-                "webhook": {
-                    "port": "[string(variables('msteamsPort'))]",
-                    "path": "[variables('msteamsWebhookPath')]",
-                },
-            },
-        },
-        "gateway": {
-            "mode": "local",
-            "bind": "loopback",
-            "port": "[string(variables('openclawPort'))]",
-            "controlUi": {
-                "enabled": True,
-                "allowedOrigins": "[variables('allowedOriginsJson')]",
-            },
-            "auth": {
-                "mode": "token",
-                "token": "${OPENCLAW_GATEWAY_TOKEN}",
-            },
-        },
-    }
-
-
-def sync_review_files_from_azuredeploy(
-    azuredeploy_path: Path,
-    openclaw_config_template_path: Path = DEFAULT_OPENCLAW_CONFIG_TEMPLATE_PATH,
-) -> None:
-    payload = read_json(azuredeploy_path)
-    review_payload = build_openclaw_config_review(payload)
-    write_text(
-        openclaw_config_template_path,
-        json.dumps(review_payload, indent=2, ensure_ascii=True) + "\n",
-    )
-
-
 def build_bootstrap_expression(template_path: Path) -> tuple[str, str, str]:
     template_text = read_text(template_path)
     rendered_template_text = render_bootstrap_template(template_text)
-    validate_template_placeholders(rendered_template_text)
     validate_shell_text("rendered bootstrap template", rendered_template_text)
     rendered_template_text = strip_generation_preamble(rendered_template_text)
-    string_literal = render_arm_string_literal(rendered_template_text)
+    arm_format_literal = escape_arm_format_literal(rendered_template_text)
+    validate_arm_format_literal(arm_format_literal)
+    string_literal = render_arm_string_literal(arm_format_literal)
     expression = render_arm_format_expression(string_literal)
     return rendered_template_text, string_literal, expression
 
@@ -313,7 +247,6 @@ def run_sync(
     write_text(arm_string_path, string_literal + "\n")
     write_text(arm_expression_path, expression + "\n")
     sync_azuredeploy_bootstrap(azuredeploy_path, expression)
-    sync_review_files_from_azuredeploy(azuredeploy_path)
 
 
 def write_arm_string(template_path: Path, output_path: Path) -> None:
@@ -408,17 +341,6 @@ def main() -> None:
         help="Output path for the full [format(...)] ARM expression",
     )
 
-    sync_review_parser = subparsers.add_parser(
-        "sync-review-files",
-        help="Sync openclawConfig.template.json from azuredeploy.json",
-    )
-    sync_review_parser.add_argument(
-        "--azuredeploy",
-        type=Path,
-        default=DEFAULT_AZUREDEPLOY_PATH,
-        help="Path to azuredeploy.json to read from",
-    )
-
     args = parser.parse_args()
 
     if args.command in (None, "sync"):
@@ -436,10 +358,6 @@ def main() -> None:
 
     if args.command == "arm-expression":
         write_arm_expression(template_path=args.template, output_path=args.output)
-        return
-
-    if args.command == "sync-review-files":
-        sync_review_files_from_azuredeploy(azuredeploy_path=args.azuredeploy)
         return
 
     parser.error(f"Unsupported command: {args.command}")
