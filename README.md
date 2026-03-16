@@ -183,6 +183,14 @@ openclaw doctor
 openclaw gateway restart
 ```
 
+如果你启用了 Microsoft Teams，需要额外注意：`openclaw update` 或显式重跑安装器以后，上游 core package 可能会覆盖已安装的 `extensions/msteams` 目录，而不会自动重放这个 Azure 模板在首次部署时执行的扩展依赖安装步骤。出现这种情况时，Teams 通道可能在日志中反复报 `Cannot find module '@microsoft/agents-hosting'`，表现为 bot 不回消息、`openclaw-approve-teams-pairing` 也看不到新的 pending request。遇到这种情况，请在虚拟机中补装 Teams 扩展依赖后再重启 gateway：
+
+```bash
+export PATH="$HOME/.openclaw/tools/node/bin:$HOME/.openclaw/bin:$PATH"
+npm install --omit=dev --prefix "$HOME/.openclaw/lib/node_modules/openclaw/extensions/msteams"
+systemctl --user restart openclaw-gateway
+```
+
 如果你希望显式重跑安装器，也可以执行：
 
 ```bash
@@ -517,6 +525,14 @@ After deployment, when you want to upgrade OpenClaw on the VM, prefer:
 openclaw update
 openclaw doctor
 openclaw gateway restart
+```
+
+If you enabled Microsoft Teams, note one extra caveat: after `openclaw update` or an explicit reinstall, the upstream core package can replace the installed `extensions/msteams` directory without rerunning the Azure bootstrap step that installs the bundled extension's npm dependencies. When that happens, the Teams channel can start failing with `Cannot find module '@microsoft/agents-hosting'`, which usually shows up as the bot not replying and `openclaw-approve-teams-pairing` seeing no new pending request. If that happens, reinstall the Teams extension dependencies on the VM and restart the gateway:
+
+```bash
+export PATH="$HOME/.openclaw/tools/node/bin:$HOME/.openclaw/bin:$PATH"
+npm install --omit=dev --prefix "$HOME/.openclaw/lib/node_modules/openclaw/extensions/msteams"
+systemctl --user restart openclaw-gateway
 ```
 
 If you want to rerun the installer explicitly instead, you can also run:
