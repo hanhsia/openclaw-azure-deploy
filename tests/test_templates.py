@@ -278,6 +278,10 @@ class AzureDeployTemplateTests(unittest.TestCase):
             self.bootstrap_script,
         )
         self.assertIn(
+            'sudo -u {5} bash -lc \'export PATH="$HOME/.openclaw/tools/node/bin:$PATH" && "$HOME/.openclaw/tools/node/bin/npm" config set prefix "$HOME/.openclaw"\'',
+            self.bootstrap_script,
+        )
+        self.assertIn(
             'OPENCLAW_BIN="$OPENCLAW_INSTALL_PREFIX/bin/openclaw"',
             self.bootstrap_script,
         )

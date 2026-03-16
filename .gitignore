@@ -15,3 +15,4 @@ teams-app-package/test-output/
 teams-app-package/dist/OpenClaw.zip
 generated/
 .generated-*.parameters.json
+.env.local
