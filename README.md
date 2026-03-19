@@ -6,11 +6,11 @@ Use the button below to easily deploy OpenClaw to your Azure environment.
 
 Azure 全球用户 / Azure Global users:
 
-[![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fhanhsia%2Fopenclaw-azure-deploy%2Fglobalupdate%2Fazuredeploy.json/createUIDefinitionUri/https%3A%2F%2Fraw.githubusercontent.com%2Fhanhsia%2Fopenclaw-azure-deploy%2Fglobalupdate%2FcreateUiDefinition.json)
+[![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fhanhsia%2Fopenclaw-azure-deploy%2Fmain%2Fazuredeploy.json/createUIDefinitionUri/https%3A%2F%2Fraw.githubusercontent.com%2Fhanhsia%2Fopenclaw-azure-deploy%2Fmain%2FcreateUiDefinition.json)
 
 Azure 中国区用户 / Azure China users:
 
-[![Deploy to Azure China](https://aka.ms/deploytoazurebutton)](https://portal.azure.cn/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fhanhsia%2Fopenclaw-azure-deploy%2Fglobalupdate%2Fazuredeploy.json/createUIDefinitionUri/https%3A%2F%2Fraw.githubusercontent.com%2Fhanhsia%2Fopenclaw-azure-deploy%2Fglobalupdate%2FcreateUiDefinition.json)
+[![Deploy to Azure China](https://aka.ms/deploytoazurebutton)](https://portal.azure.cn/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fhanhsia%2Fopenclaw-azure-deploy%2Fmain%2Fazuredeploy.json/createUIDefinitionUri/https%3A%2F%2Fraw.githubusercontent.com%2Fhanhsia%2Fopenclaw-azure-deploy%2Fmain%2FcreateUiDefinition.json)
 
 <a id="zh-cn"></a>
 # 中文部署指南
@@ -232,7 +232,7 @@ az group create --name rg-openclaw-sea --location southeastasia
 az deployment group create \
   --name openclaw-sea-20260307 \
   --resource-group rg-openclaw-sea \
-  --template-uri https://raw.githubusercontent.com/hanhsia/openclaw-azure-deploy/globalupdate/azuredeploy.json \
+  --template-uri https://raw.githubusercontent.com/hanhsia/openclaw-azure-deploy/main/azuredeploy.json \
   --parameters \
     vmName=openclaw-sea-20260307 \
     location=southeastasia \
@@ -578,7 +578,7 @@ If you want Azure OpenAI configured during deployment, provide `azureOpenAiEndpo
 az deployment group create \
   --name openclaw-sea-20260307 \
   --resource-group rg-openclaw-sea \
-  --template-uri https://raw.githubusercontent.com/hanhsia/openclaw-azure-deploy/globalupdate/azuredeploy.json \
+  --template-uri https://raw.githubusercontent.com/hanhsia/openclaw-azure-deploy/main/azuredeploy.json \
   --parameters \
     vmName=openclaw-sea-20260307 \
     location=southeastasia \
