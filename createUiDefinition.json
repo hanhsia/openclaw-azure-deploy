@@ -166,7 +166,7 @@
             "visible": "[equals(steps('openai').azureOpenAiAuthMode, 'managedIdentity')]",
             "options": {
               "icon": "Info",
-              "text": "The template will automatically assign the 'Cognitive Services OpenAI User' role to the VM's managed identity on your Azure OpenAI resource. This requires the deploying user to have Owner or User Access Administrator role. If the role assignment fails, the deployment output will include the Azure CLI command to assign it manually."
+              "text": "The template will automatically attempt to assign the 'Cognitive Services OpenAI User' role to the VM's managed identity. If your account has Owner or User Access Administrator role, this succeeds automatically. If not, the Azure portal may show the deployment as partially failed, but the VM and OpenClaw are fully functional. The deployment outputs include the Azure CLI command to assign the role manually — no redeployment needed."
             }
           },
           {

@@ -1223,7 +1223,24 @@ class AzureIntegrationDeploymentTests(unittest.TestCase):
             self.env.get("TEST_AZURE_OPENAI_DEPLOYMENT", "").strip(),
             self.env.get("TEST_AZURE_OPENAI_API_KEY", "").strip(),
         ]
-        if all(openai_values):
+        openai_auth_mode = self.env.get("TEST_AZURE_OPENAI_AUTH_MODE", "").strip()
+        if openai_auth_mode == "managedIdentity":
+            if openai_values[0] and openai_values[1]:
+                parameters.extend(
+                    [
+                        "azureOpenAiAuthMode=managedIdentity",
+                        f"azureOpenAiEndpoint={openai_values[0]}",
+                        f"azureOpenAiDeployment={openai_values[1]}",
+                    ]
+                )
+                openai_resource_group = self.env.get(
+                    "TEST_AZURE_OPENAI_RESOURCE_GROUP", ""
+                ).strip()
+                if openai_resource_group:
+                    parameters.append(
+                        f"azureOpenAiResourceGroup={openai_resource_group}"
+                    )
+        elif all(openai_values):
             parameters.extend(
                 [
                     f"azureOpenAiEndpoint={openai_values[0]}",
@@ -1320,6 +1337,15 @@ class AzureIntegrationDeploymentTests(unittest.TestCase):
             self._validate_runtime_browser_helper_output(
                 cloud_name, vm_public_fqdn, openclaw_public_url
             )
+
+            if openai_auth_mode == "managedIdentity":
+                self._validate_managed_identity_runtime(
+                    cloud_name,
+                    vm_public_fqdn,
+                    outputs,
+                    self.env.get("TEST_AZURE_OPENAI_DEPLOYMENT", "").strip(),
+                )
+
             self._apply_devices_list_workaround(cloud_name, vm_public_fqdn)
             self._assert_pairing_rpc_stable(cloud_name, vm_public_fqdn)
             if self._should_validate_browser_pairing():
@@ -1479,6 +1505,137 @@ class AzureIntegrationDeploymentTests(unittest.TestCase):
     def test_real_deploy_china_azure(self):
         self._deploy_and_cleanup(
             CHINA_CLOUD, CHINA_LOCATION, "TEST_CHINA_SUBSCRIPTION_ID"
+        )
+
+    def _validate_managed_identity_runtime(
+        self, cloud_name, vm_public_fqdn, outputs, expected_deployment
+    ):
+        self._log(
+            cloud_name,
+            "Validating managed identity runtime: proxy service, model allowlist, deployment outputs",
+        )
+
+        # 1. Validate deployment outputs
+        auth_mode_output = outputs.get("azureOpenAiAuthMode", {}).get("value", "")
+        self.assertEqual(auth_mode_output, "managedIdentity")
+        vm_principal_id = outputs.get("vmPrincipalId", {}).get("value", "")
+        self.assertTrue(
+            vm_principal_id,
+            "vmPrincipalId output must be non-empty for managed identity deployment",
+        )
+        role_hint = outputs.get("azureOpenAiRoleAssignmentHint", {}).get("value", "")
+        self.assertIn(
+            "Cognitive Services OpenAI User",
+            role_hint,
+        )
+        self._log(
+            cloud_name,
+            f"vmPrincipalId={vm_principal_id}",
+        )
+
+        # 2. Validate MI proxy service is running on the VM
+        proxy_stdout, _ = self._run_ssh(
+            cloud_name,
+            vm_public_fqdn,
+            (
+                "bash -lc '"
+                'printf "mi_proxy_active=%s\n" "$(sudo systemctl is-active azure-openai-mi-proxy)" '
+                '&& printf "mi_proxy_health=%s\n" "$(curl --fail --silent --max-time 5 http://127.0.0.1:18790/health 2>/dev/null || echo fail)" '
+                '&& printf "mi_proxy_script=%s\n" "$(test -x /usr/local/bin/azure-openai-mi-proxy && echo present || echo missing)" '
+                "'"
+            ),
+        )
+        proxy_values = {}
+        for line in proxy_stdout.splitlines():
+            if "=" in line:
+                key, value = line.split("=", 1)
+                proxy_values[key.strip()] = value.strip()
+        self.assertEqual(
+            proxy_values.get("mi_proxy_active"),
+            "active",
+            "azure-openai-mi-proxy systemd service must be active",
+        )
+        self.assertEqual(
+            proxy_values.get("mi_proxy_health"),
+            "ok",
+            "MI proxy /health endpoint must return ok",
+        )
+        self.assertEqual(
+            proxy_values.get("mi_proxy_script"),
+            "present",
+            "MI proxy script must exist and be executable",
+        )
+
+        # 3. Validate OpenClaw config uses local proxy and model allowlist
+        config_stdout, _ = self._run_ssh(
+            cloud_name,
+            vm_public_fqdn,
+            (
+                "bash -lc '"
+                'printf "provider_base_url=%s\n" "$(/usr/local/bin/openclaw config get models.providers.openai.baseUrl)" '
+                '&& printf "provider_api_key=%s\n" "$(/usr/local/bin/openclaw config get models.providers.openai.apiKey)" '
+                '&& printf "default_model=%s\n" "$(/usr/local/bin/openclaw config get agents.defaults.model.primary)" '
+                '&& printf "models_mode=%s\n" "$(/usr/local/bin/openclaw config get models.mode)" '
+                "&& /usr/local/bin/openclaw config get agents.defaults.models --strict-json 2>/dev/null | head -n 20 "
+                "'"
+            ),
+        )
+        config_values = {}
+        extra_lines = []
+        for line in config_stdout.splitlines():
+            if "=" in line and not line.startswith("{") and not line.startswith(" "):
+                key, value = line.split("=", 1)
+                config_values[key.strip()] = value.strip()
+            else:
+                extra_lines.append(line)
+        self.assertEqual(
+            config_values.get("provider_base_url"),
+            "http://127.0.0.1:18790/openai/v1/",
+            "Provider base URL must point to local MI proxy",
+        )
+        self.assertEqual(
+            config_values.get("provider_api_key"),
+            "managed-identity",
+            "Provider apiKey must be the managed-identity placeholder",
+        )
+        if expected_deployment:
+            self.assertEqual(
+                config_values.get("default_model"),
+                f"openai/{expected_deployment}",
+            )
+
+        # Verify model allowlist contains only the configured deployment
+        allowlist_text = "\n".join(extra_lines)
+        if expected_deployment:
+            self.assertIn(
+                f"openai/{expected_deployment}",
+                allowlist_text,
+                "Model allowlist must contain the configured deployment model",
+            )
+
+        self._log(
+            cloud_name,
+            "Managed identity runtime validation passed",
+        )
+
+    def test_real_deploy_global_azure_managed_identity(self):
+        if self.env.get("TEST_RUN_INTEGRATION", "0") != "1":
+            self.skipTest(
+                "Set TEST_RUN_INTEGRATION=1 in .env to enable real Azure integration tests."
+            )
+        if self.env.get("TEST_AZURE_OPENAI_AUTH_MODE", "").strip() != "managedIdentity":
+            self.skipTest(
+                "Set TEST_AZURE_OPENAI_AUTH_MODE=managedIdentity in .env to run this test."
+            )
+        openai_endpoint = self.env.get("TEST_AZURE_OPENAI_ENDPOINT", "").strip()
+        openai_deployment = self.env.get("TEST_AZURE_OPENAI_DEPLOYMENT", "").strip()
+        if not openai_endpoint or not openai_deployment:
+            self.skipTest(
+                "Set TEST_AZURE_OPENAI_ENDPOINT and TEST_AZURE_OPENAI_DEPLOYMENT in .env "
+                "when TEST_AZURE_OPENAI_AUTH_MODE=managedIdentity."
+            )
+        self._deploy_and_cleanup(
+            GLOBAL_CLOUD, GLOBAL_LOCATION, "TEST_GLOBAL_SUBSCRIPTION_ID"
         )
 
 

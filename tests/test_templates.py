@@ -832,32 +832,42 @@ class AzureDeployTemplateTests(unittest.TestCase):
         self.assertEqual(len(vm_resources), 1)
         self.assertEqual(vm_resources[0]["identity"]["type"], "SystemAssigned")
 
-    def test_managed_identity_role_assignment_resource_exists(self):
+    def test_role_assignment_resource_is_non_blocking(self):
         role_assignment_deployments = [
             r
             for r in self.template["resources"]
             if r["type"] == "Microsoft.Resources/deployments"
-            and r["name"] == "azureOpenAiRoleAssignment"
+            and r.get("name") == "azureOpenAiRoleAssignment"
         ]
         self.assertEqual(len(role_assignment_deployments), 1)
         deployment = role_assignment_deployments[0]
         self.assertEqual(
             deployment["condition"], "[variables('isManagedIdentityAuth')]"
         )
-        self.assertIn(
-            "resolvedAzureOpenAiResourceGroup",
-            deployment["resourceGroup"],
-        )
-        inner_resources = deployment["properties"]["template"]["resources"]
-        self.assertEqual(len(inner_resources), 1)
-        ra = inner_resources[0]
-        self.assertEqual(ra["type"], "Microsoft.Authorization/roleAssignments")
-        self.assertIn("CognitiveServices/accounts", ra["scope"])
-        self.assertIn(
-            "cognitiveServicesOpenAiUserRoleId",
-            ra["properties"]["roleDefinitionId"],
-        )
-        self.assertEqual(ra["properties"]["principalType"], "ServicePrincipal")
+        # Verify no other resource depends on the role assignment
+        role_assignment_resource_id = "azureOpenAiRoleAssignment"
+        for resource in self.template["resources"]:
+            depends_on = resource.get("dependsOn", [])
+            for dep in depends_on:
+                self.assertNotIn(
+                    role_assignment_resource_id,
+                    dep,
+                    f"Resource {resource.get('name', resource['type'])} must not depend on role assignment",
+                )
+        # Verify the bootstrap extension only depends on the VM, not the role assignment
+        bootstrap_extensions = [
+            r
+            for r in self.template["resources"]
+            if r["type"] == "Microsoft.Compute/virtualMachines/extensions"
+        ]
+        self.assertEqual(len(bootstrap_extensions), 1)
+        bootstrap_deps = bootstrap_extensions[0].get("dependsOn", [])
+        for dep in bootstrap_deps:
+            self.assertNotIn(
+                "azureOpenAiRoleAssignment",
+                dep,
+                "Bootstrap extension must not depend on role assignment",
+            )
 
     def test_azure_openai_resource_group_parameter_exists(self):
         parameters = self.template["parameters"]
@@ -881,6 +891,12 @@ class AzureDeployTemplateTests(unittest.TestCase):
         self.assertIn('"apiKey": "managed-identity"', self.bootstrap_script)
         self.assertIn(
             '"apiKey": "$OPENCLAW_AZURE_OPENAI_API_KEY"', self.bootstrap_script
+        )
+
+    def test_bootstrap_script_sets_model_allowlist(self):
+        self.assertIn(
+            'run_openclaw_config_json agents.defaults.models "{\\"openai/$OPENCLAW_AZURE_OPENAI_DEPLOYMENT\\":{}}"',
+            self.bootstrap_script,
         )
 
     def test_ui_definition_contains_auth_mode_dropdown(self):

@@ -2,8 +2,6 @@
 
 [中文](#zh-cn) | [English](#en)
 
-Use the button below to easily deploy OpenClaw to your Azure environment.
-
 Azure 全球用户 / Azure Global users:
 
 [![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fhanhsia%2Fopenclaw-azure-deploy%2Fopenaiauth%2Fazuredeploy.json/createUIDefinitionUri/https%3A%2F%2Fraw.githubusercontent.com%2Fhanhsia%2Fopenclaw-azure-deploy%2Fopenaiauth%2FcreateUiDefinition.json)
@@ -12,238 +10,176 @@ Azure 中国区用户 / Azure China users:
 
 [![Deploy to Azure China](https://aka.ms/deploytoazurebutton)](https://portal.azure.cn/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fhanhsia%2Fopenclaw-azure-deploy%2Fopenaiauth%2Fazuredeploy.json/createUIDefinitionUri/https%3A%2F%2Fraw.githubusercontent.com%2Fhanhsia%2Fopenclaw-azure-deploy%2Fopenaiauth%2FcreateUiDefinition.json)
 
+---
+
 <a id="zh-cn"></a>
 # 中文部署指南
 
-本指南将引导您完成 OpenClaw 在 Azure 上的完整部署流程。部署完成后，您将自动获得一台配置好的 Ubuntu 虚拟机、持久化数据盘、自动分配的公网域名以及安全的 HTTPS 访问。
+## 1. 准备 SSH 密钥
 
-## 1. 准备部署信息
+如果您已有 SSH 密钥对，可以跳过此步骤。
 
-在开始部署之前，您需要准备以下信息：
+**Windows（PowerShell）：**
+```powershell
+ssh-keygen -t ed25519 -C "openclaw-azure"
+Get-Content $env:USERPROFILE\.ssh\id_ed25519.pub
+```
 
-- **SSH 公钥** (SSH Public Key)：用于稍后安全登录虚拟机
+**macOS / Linux：**
+```bash
+ssh-keygen -t ed25519 -C "openclaw-azure"
+cat ~/.ssh/id_ed25519.pub
+```
 
-如果您希望部署完成后立即接入 Azure OpenAI，您可以选择以下两种认证方式之一：
+复制输出的公钥内容，稍后粘贴到部署表单中。
 
-**方式 A — API Key（传统方式）：**
-- **Azure OpenAI 终结点** (Endpoint)：例如 `https://your-resource.cognitiveservices.azure.com/`
-- **模型部署名称** (Deployment Name)：您在 Azure OpenAI 中部署的模型名称，例如 `gpt-4o`
-- **API 密钥** (API Key)：您的 Azure OpenAI 访问密钥
+## 2. （可选）准备 Azure OpenAI 信息
 
-**方式 B — Managed Identity（推荐，Entra ID）：**
-- **Azure OpenAI 终结点** (Endpoint)：同上
-- **模型部署名称** (Deployment Name)：同上
-- 无需 API 密钥。模板会在 VM 上部署一个本地令牌代理，使用 VM 的系统分配托管标识自动获取和刷新 Azure OpenAI 访问令牌。**模板会自动尝试为 VM 的托管标识分配 `Cognitive Services OpenAI User` 角色**；如果部署用户权限不足，部署会失败并给出手动分配的 CLI 命令（详见下方说明）。
+如果您希望部署后立即使用 Azure OpenAI，请根据认证方式准备以下信息：
 
-如果您希望部署完成后立即接入飞书（WebSocket 长连接模式），请先在飞书开放平台完成应用配置并获取以下信息：
+| 参数 | API Key 模式 | Managed Identity 模式（推荐） |
+|------|------------|--------------------------|
+| Azure OpenAI 终结点 | 必填 | 必填 |
+| 模型部署名称 | 必填 | 必填 |
+| API 密钥 | 必填 | 无需 |
+| Azure OpenAI 资源组名称 | 跨资源组时填写 | 跨资源组时填写 |
 
-- **Feishu App ID**：飞书开放平台中应用的 App ID，例如 `cli_xxx`
-- **Feishu App Secret**：飞书开放平台中应用的 App Secret
+Managed Identity 模式下，模板会自动尝试为 VM 分配 `Cognitive Services OpenAI User` 角色。如果部署用户权限不足，角色分配会失败，但 VM 和 OpenClaw 仍然正常部署完成（Azure 门户可能显示"部分失败"）。用户只需后续手动补上角色即可，不需要重新部署（详见第 5 步）。
 
-这两个飞书参数要么全部填写，要么全部留空。
+不需要 Azure OpenAI 则全部留空。
 
-如果您希望部署完成后立即接入 Microsoft Teams（标准模式），请先准备以下信息：
+## 3.（可选）准备通道集成信息
 
-- **Teams Bot App ID**：您在 Microsoft Entra / Azure Bot 中使用的应用 ID
-- **Teams Bot App Password**：对应应用的客户端密钥值
+**飞书（Azure China / Azure Global 均可）：** 在飞书开放平台创建企业自建应用，开启机器人能力，添加 `im.message.receive_v1` 事件订阅并选择 WebSocket 长连接模式，发布应用后获取：
+- **Feishu App ID** 和 **Feishu App Secret**（两个参数要么全填，要么全部留空）
 
-Teams 标准模式当前仅支持 **Azure Global**，不支持 **Azure China**。模板会自动使用当前 Azure tenant 作为 Teams 所需的 tenant ID，因此您无需手动填写 tenant ID。
+**Microsoft Teams（仅 Azure Global）：** 在 Azure 中创建 Azure Bot / App Registration，获取：
+- **Teams Bot App ID** 和 **Teams Bot App Password**（两个参数要么全填，要么全部留空）
 
-这两个 Teams 参数要么全部填写，要么全部留空。
+模板自动使用当前 Azure tenant 作为 Teams tenant ID，无需手动填写。
 
-如果你还没有 SSH 密钥对，可以参考下方操作系统的具体说明进行生成。
+## 4. 部署到 Azure
 
-## 2. 一键部署流程
+### 方式 A：一键部署（推荐）
 
-1. 点击上方的 **Deploy to Azure** 按钮。
-2. 登录您的 Azure 账号。
-3. 在部署页面中，选择或创建一个 **资源组 (Resource Group)**。
-4. 填写表单中的参数：
-  - `vmName`：自定义您的虚拟机名称，例如 `openclaw-prod-001`
-  - `adminUsername`：SSH 登录用户名，默认值为 `azureuser`
-  - `sshPublicKey`：粘贴您的 SSH **公钥** `.pub` 文件内容（非私钥）
-  - `vmSize`：虚拟机规格，例如 `Standard_B2as_v2`
-  - `azureOpenAiEndpoint`：可选，您的 Azure OpenAI 终结点
-  - `azureOpenAiDeployment`：可选，您的模型部署名称
-  - `azureOpenAiApiKey`：可选，您的 Azure OpenAI API 密钥（仅 API Key 模式需要）
-  - Azure OpenAI 认证模式：在部署表单中选择 API Key 或 Managed Identity；如果不接入 Azure OpenAI 则选择 None
-  - `feishuAppId`：可选，飞书应用的 App ID
-  - `feishuAppSecret`：可选，飞书应用的 App Secret
-  - `msteamsAppId`：可选，Microsoft Teams Bot App ID，仅支持 Azure Global
-  - `msteamsAppPassword`：可选，Microsoft Teams Bot App Password，仅支持 Azure Global
-  - 上述三个 Azure OpenAI 参数的组合取决于认证模式选择：API Key 模式三个都要填，Managed Identity 模式只需填终结点和部署名称
-  - 上述两个飞书参数要么全部填写，要么全部留空
-  - 上述两个 Teams 参数要么全部填写，要么全部留空；tenant ID 由模板自动取当前 Azure tenant
-5. 点击**查看 + 创建**，然后点击**创建**提交部署。
-6. 等待部署完成。请耐心等待，直到所有资源（特别是扩展 `openclaw-bootstrap`）显示部署成功。
-7. 部署完成后，点击左侧的**输出 (Outputs)**，记录以下重要信息：
-   - `vmPublicFqdn` (虚拟机公网域名，用于稍后 SSH 登录,你也可以查看虚拟机的的DNS 名称获得)
-   - `vmPrincipalId` (如果选择了 Managed Identity 模式，后续需要用它来分配角色)
+1. 点击上方的 **Deploy to Azure** 按钮，登录 Azure 账号。
+2. 选择或创建一个**资源组 (Resource Group)**。
+3. 填写表单参数：
+   - `vmName`：虚拟机名称
+   - `adminUsername`：SSH 用户名（默认 `azureuser`）
+   - `sshPublicKey`：粘贴第 1 步获得的 SSH 公钥内容
+   - `vmSize`：虚拟机规格（默认 `Standard_B2as_v2`）
+   - Azure OpenAI 相关参数（可选，见第 2 步）
+   - 飞书 / Teams 通道参数（可选，见第 3 步）
+4. 点击**查看 + 创建** → **创建**，等待部署完成。
+5. 部署完成后，点击左侧**输出 (Outputs)**，记录：
+   - `vmPublicFqdn`：虚拟机公网域名（用于 SSH 登录）
+   - `vmPrincipalId`：VM 托管标识 ID（Managed Identity 模式需要）
 
-### Managed Identity 部署后配置（仅限选择 Managed Identity 模式）
-
-如果您在部署时选择了 **Managed Identity (Entra ID)** 认证模式，模板会**自动尝试**为 VM 的托管标识分配 `Cognitive Services OpenAI User` 角色。
-
-- **权限充足时（Owner / User Access Administrator）：** 角色自动分配成功，无需额外操作。
-- **权限不足时（如 Contributor）：** 部署会失败，ARM 错误信息会提示 `AuthorizationFailed`。此时您可以先手动分配角色，然后重新部署，或者请有权限的管理员帮忙分配。
-- 部署输出中的 `azureOpenAiRoleAssignmentHint` 会包含手动分配所需的完整 Azure CLI 命令。
-- 如果 Azure OpenAI 资源和此部署不在同一个资源组，请在部署表单中填写 Azure OpenAI 资源所在的资源组名称。
-
-#### 手动分配角色（权限不足时）
-
-##### 通过 Azure 门户
-
-1. 打开 Azure 门户，导航到您的 **Azure OpenAI 资源**（或其所在的 Cognitive Services 账户）。
-2. 在左侧菜单中选择 **访问控制 (IAM)**。
-3. 点击 **添加** → **添加角色分配**。
-4. 选择角色 **Cognitive Services OpenAI User**。
-5. 在"成员"中，选择 **托管标识**，然后搜索并选择您部署的虚拟机名称。
-6. 点击 **审查 + 分配** 完成。
-
-##### 通过 Azure CLI
+### 方式 B：Azure CLI 部署
 
 ```bash
-# 从部署输出中获取 VM 的 principal ID（或替换为 vmPrincipalId 输出值）
+# Azure 中国区用户先执行: az cloud set --name AzureChinaCloud
+az login
+
+az group create --name rg-openclaw --location southeastasia
+
+# API Key 模式
+az deployment group create \
+  --name openclaw-deploy \
+  --resource-group rg-openclaw \
+  --template-uri https://raw.githubusercontent.com/hanhsia/openclaw-azure-deploy/openaiauth/azuredeploy.json \
+  --parameters \
+    vmName=my-openclaw \
+    sshPublicKey="ssh-ed25519 AAAA..." \
+    azureOpenAiAuthMode=key \
+    azureOpenAiEndpoint="https://your-resource.cognitiveservices.azure.com/" \
+    azureOpenAiDeployment="gpt-5.2" \
+    azureOpenAiApiKey="your-api-key"
+
+# Managed Identity 模式（推荐）：省略 azureOpenAiApiKey，改 azureOpenAiAuthMode=managedIdentity
+# 不接入 Azure OpenAI：省略所有 azureOpenAi* 参数
+```
+
+查看部署输出：
+```bash
+az deployment group show \
+  --name openclaw-deploy \
+  --resource-group rg-openclaw \
+  --query properties.outputs
+```
+
+## 5.（Managed Identity 模式）部署后分配角色
+
+如果您选择了 Managed Identity 认证模式，模板会**自动尝试**为 VM 的托管标识分配 `Cognitive Services OpenAI User` 角色。
+
+- **权限充足时（Owner / User Access Administrator）：** 角色自动分配成功，无需额外操作。
+- **权限不足时（如 Contributor）：** 角色分配会失败，Azure 门户可能显示部署为"部分失败"。但 **VM、OpenClaw、MI 代理服务全部正常运行**，不需要重新部署。您只需手动补上角色，下一次 chat 请求即可正常工作。
+
+部署输出中的 `azureOpenAiRoleAssignmentHint` 包含可直接复制执行的完整 `az role assignment create` 命令。
+
+**通过 Azure 门户分配：**
+1. 打开 Azure OpenAI 资源 → **访问控制 (IAM)** → **添加角色分配**。
+2. 角色选 **Cognitive Services OpenAI User**，成员选**托管标识**，搜索并选择您的虚拟机。
+3. **审查 + 分配**。
+
+**通过 Azure CLI 分配：**
+```bash
 vm_principal_id=$(az deployment group show \
   --name <deployment-name> \
   --resource-group <resource-group> \
   --query properties.outputs.vmPrincipalId.value -o tsv)
 
-# 为 VM 分配 Cognitive Services OpenAI User 角色
 az role assignment create \
   --assignee "$vm_principal_id" \
   --role "Cognitive Services OpenAI User" \
   --scope "/subscriptions/<subscription-id>/resourceGroups/<resource-group>/providers/Microsoft.CognitiveServices/accounts/<openai-resource-name>"
 ```
 
-> **注意：** 执行 `az role assignment create` 的用户需要拥有 Owner、User Access Administrator 或 Role Based Access Control Administrator 角色。Contributor 角色不具备分配角色的权限。
+> 执行此命令的用户需要 Owner、User Access Administrator 或 Role Based Access Control Administrator 角色。角色分配生效后，下一次 chat 请求即可正常工作。
 
-## 3. 连接与初始化配置
+## 6. SSH 登录虚拟机
 
-根据您的操作系统，按照以下步骤登录虚拟机并获取访问令牌。登录成功后，您可以直接在虚拟机上使用 `openclaw` 命令。当前模板遵循 OpenClaw 官方推荐的 host-local 管理模式：管理员 SSH 登录 shell 默认连接本机 loopback gateway；浏览器和其它远端 client 继续通过公网 HTTPS/WSS 入口访问同一个 gateway，因此仍然共享同一份配置、workspace 和 session store。
-
-### Windows 用户操作步骤
-
-#### 准备 SSH 密钥
-如果您还没有 SSH 密钥，可以先在 PowerShell 中执行以下命令生成一对新的 SSH 密钥：
-```powershell
-ssh-keygen -t ed25519 -C "openclaw-azure"
-```
-
-生成完成后，再运行以下命令获取公钥内容，并将其粘贴到 Azure 部署表单中：
-```powershell
-Get-Content $env:USERPROFILE\.ssh\id_ed25519.pub
-```
-
-#### SSH 登录虚拟机
-使用您的 SSH 私钥（例如 `id_ed25519`）连接虚拟机：
+**Windows（PowerShell）：**
 ```powershell
 ssh -i "$env:USERPROFILE\.ssh\id_ed25519" azureuser@<vmPublicFqdn>
 ```
-*(请将 `<vmPublicFqdn>` 替换为您在部署输出中记录的域名，如有其他私钥名称或位置请相应调整)*
 
-当前模板会在初始化阶段为 `adminUsername` 预装 Linux Homebrew 到 `/home/linuxbrew/.linuxbrew`，并通过 `/etc/profile.d/linuxbrew.sh` 自动加入登录 shell 环境；同一个管理员用户还会收到 `NOPASSWD:ALL` 的 sudoers drop-in，因此 `sudo ...` 默认不会要求输入密码。这个设置是为了把虚拟机当成管理员自管的运维主机使用，不适合低权限多人共用跳板机场景。
-
-#### 获取 Web 控制台地址
-登录成功后，在已经 SSH 进入 Azure 虚拟机的远程终端中执行：
-```bash
-openclaw-browser-url
-```
-输出示例：
-```text
-Dashboard URL: https://your-hostname/#token=...
-```
-将完整的 URL 复制并在浏览器中打开。
-
-#### 设备配对授权
-如果浏览器页面提示 `pairing required` 或需要配对，请保持页面打开，回到 SSH 终端执行以下许可命令：
-```bash
-openclaw-approve-browser
-```
-该 helper 会直接读取本机的浏览器配对队列并批准最新的 Control UI 请求。如果脚本提示当前没有待处理的浏览器配对请求，请保持浏览器停留在配对页面，等待几秒后重试。
-补充说明：OpenClaw 上游 `2026.3.12` 到 `2026.3.13` 期间存在已知的 loopback WebSocket 握手回归，某些机器上 `openclaw devices list` 可能会报 `gateway closed (1000 normal closure): no close reason`，即使 `openclaw gateway status` 和 `openclaw gateway call device.pair.list --json --params "{}"` 仍然正常。这个 Azure 模板目前不内置 monkey patch，而是避开这条已知不稳定的 wrapper 路径，等待上游正式修复版本。
-命令执行完毕后，回到浏览器刷新页面即可完成登录。
-
-#### 在本机 loopback 和公网 gateway 之间切换 SSH CLI
-默认情况下，这个模板会让 SSH 管理员 shell 继续走 OpenClaw 官方推荐的本机 loopback 管理路径。如果你需要临时切到公网 `wss://` gateway 进行排查，可以执行：
-```bash
-openclaw-use-public-gateway
-```
-该 helper 会先探测 SSH CLI 走公网 `wss://` 的连接是否已配对；如果还没有，它会按这台 VM 当前 SSH CLI 的本机 device identity 去匹配并自动批准对应的 pending request，然后再用 `openclaw health --verbose` 验证公网路径已经真的可用，最后才持久化切换。
-如果要切回默认 loopback：
-```bash
-openclaw-use-loopback-gateway
-```
-切换结果会保存到后续登录 shell，所以执行完以后请重新登录 SSH，再运行以下命令确认当前模式：
-```bash
-openclaw-gateway-mode current
-```
-
----
-
-### macOS / Linux 用户操作步骤
-
-#### 准备 SSH 密钥
-如果您还没有 SSH 密钥，请先运行以下命令生成一对新的 SSH 密钥：
-```bash
-ssh-keygen -t ed25519 -C "openclaw-azure"
-```
-
-生成完成后，再运行以下命令查看公钥并复制整行内容到 Azure 表单：
-```bash
-cat ~/.ssh/id_ed25519.pub
-```
-
-#### SSH 登录虚拟机
+**macOS / Linux：**
 ```bash
 ssh -i ~/.ssh/id_ed25519 azureuser@<vmPublicFqdn>
 ```
-*(请将 `<vmPublicFqdn>` 替换为您在部署输出中记录的域名)*
 
-#### 获取 Web 控制台地址
-登录成功后，在已经 SSH 进入 Azure 虚拟机的远程终端中执行：
+将 `<vmPublicFqdn>` 替换为部署输出中的域名。
+
+## 7. 获取 Web 控制台地址并打开浏览器
+
+SSH 登录虚拟机后，执行：
 ```bash
 openclaw-browser-url
 ```
-将终端输出的完整 Dashboard URL 复制并在浏览器中打开。
 
-#### 设备配对授权
-如果浏览器页面提示需要配对授权，请回到 SSH 终端执行：
+输出示例：
+```
+Dashboard URL: https://your-hostname/#token=...
+```
+
+将完整 URL 复制到浏览器中打开。
+
+## 8. 浏览器配对授权
+
+如果浏览器页面提示 `pairing required`，**保持页面打开**，回到 SSH 终端执行：
 ```bash
 openclaw-approve-browser
 ```
-该 helper 会直接读取本机的浏览器配对队列并批准最新的 Control UI 请求，不依赖 `openclaw devices list/approve` 这条 RPC 路径。如果脚本提示当前没有待处理的浏览器配对请求，请保持浏览器停留在配对页面，等待几秒后重试。
-补充说明：OpenClaw 上游 `2026.3.12` 到 `2026.3.13` 期间存在已知的 loopback WebSocket 握手回归，某些机器上 `openclaw devices list` 可能会报 `gateway closed (1000 normal closure): no close reason`，即使 `openclaw gateway status` 和 `openclaw gateway call device.pair.list --json --params "{}"` 仍然正常。这个 Azure 模板目前不内置 monkey patch，而是避开这条已知不稳定的 wrapper 路径，等待上游正式修复版本。
-如果你需要在这台 VM 上直接做管理员配置，优先使用本机 CLI：
 
-```bash
-openclaw health --verbose
-openclaw config get gateway.auth.mode
-```
+该 helper reads the local browser pairing queue directly 并批准最新的 Control UI 请求。如果提示没有待处理的配对请求，请保持浏览器停留在配对页面，等待几秒后重试。命令执行完毕后，回到浏览器刷新页面即可。
 
-第一条会确认当前 SSH CLI 正在通过本机 loopback 访问 gateway；第二条会确认它读到的就是 daemon 正在使用的同一份配置。后续在 SSH 里执行 `openclaw config set ...`、`openclaw config validate`、`openclaw gateway restart` 时，变更会直接作用于这台 Azure VM 上的同一个 gateway，因此浏览器和其它 client 也会使用更新后的配置。然后返回浏览器刷新页面，即可正常使用 OpenClaw。
+> OpenClaw 上游 `2026.3.12` 到 `2026.3.13` 期间存在已知的 loopback WebSocket 握手回归，`openclaw devices list` 可能报错，但本模板的 `openclaw-approve-browser` 不依赖该路径。
 
-如果你需要临时把 SSH CLI 切到公网 `wss://` gateway，可以运行：
+## 9. （可选）后续升级
 
-```bash
-openclaw-use-public-gateway
-```
-该 helper 会先探测 SSH CLI 走公网 `wss://` 的连接是否已配对；如果还没有，它会按这台 VM 当前 SSH CLI 的本机 device identity 去定位并自动批准对应的 pending request，然后再用 `openclaw health --verbose` 验证公网路径已经真的可用，最后才把后续登录 shell 的默认 gateway 切到公网 `wss://`。
-
-如需恢复默认 loopback：
-
-```bash
-openclaw-use-loopback-gateway
-```
-
-执行后重新登录 SSH，再运行 `openclaw-gateway-mode current` 确认当前模式即可。
-
-
-## 4. 后续升级
-
-这个模板会在虚拟机中使用 OpenClaw 官方推荐的**非交互三步安装路径**：先运行**官方 `install-cli.sh` 安装器**把 CLI 与专用 Node 运行时装到 `adminUsername` 对应用户的 `~/.openclaw` 前缀下，再执行 `openclaw onboard --non-interactive --install-daemon` 完成 gateway 和托管服务安装，最后在同一个 bootstrap 脚本里通过 `openclaw config` 写入 Azure 传入的模型与 channel 配置。当前模板固定使用最新稳定版 Node `24.14.0`，而不是依赖系统 `/usr` 下的全局 Node/npm。这样做既更接近 OpenClaw 官方推荐的无 root CLI 安装路径，也能让部署后的 SSH 管理员用户直接执行 `openclaw update`，避免因为 `/usr/lib/node_modules` 无写权限而失败。
-
-部署完成后，如果你需要升级 OpenClaw，建议优先在虚拟机中执行：
+本模板使用官方 `install-cli.sh` 安装器将 CLI 和专用 Node 运行时装到用户的 `~/.openclaw` 前缀下，再通过 `openclaw onboard --non-interactive --install-daemon` 完成 gateway 安装，最后通过 `openclaw config` 写入 Azure 传入的配置。
 
 ```bash
 openclaw update
@@ -251,16 +187,14 @@ openclaw doctor
 openclaw gateway restart
 ```
 
-如果你启用了 Microsoft Teams，需要额外注意：`openclaw update` 或显式重跑安装器以后，上游 core package 可能会覆盖已安装的 `extensions/msteams` 目录，而不会自动重放这个 Azure 模板在首次部署时执行的扩展依赖安装步骤。出现这种情况时，Teams 通道可能在日志中反复报 `Cannot find module '@microsoft/agents-hosting'`，表现为 bot 不回消息、`openclaw-approve-teams-pairing` 也看不到新的 pending request。遇到这种情况，请在虚拟机中补装 Teams 扩展依赖后再重启 gateway：
-
+如果启用了 Teams，升级后可能需要补装扩展依赖：
 ```bash
 export PATH="$HOME/.openclaw/tools/node/bin:$HOME/.openclaw/bin:$PATH"
 npm install --omit=dev --prefix "$HOME/.openclaw/lib/node_modules/openclaw/extensions/msteams"
 systemctl --user restart openclaw-gateway
 ```
 
-如果你希望显式重跑安装器，也可以执行：
-
+如需完全重跑安装器：
 ```bash
 curl -fsSL https://openclaw.ai/install-cli.sh | bash -s -- --prefix "$HOME/.openclaw" --node-version 24.14.0 --no-onboard
 bash -c '. /etc/openclaw/openclaw.env && openclaw onboard --non-interactive --accept-risk --mode local --workspace /data/workspace --auth-choice skip --gateway-port "$OPENCLAW_GATEWAY_PORT" --gateway-bind loopback --gateway-auth token --gateway-token "$OPENCLAW_GATEWAY_TOKEN" --install-daemon --daemon-runtime node --skip-channels --skip-skills'
@@ -269,422 +203,217 @@ openclaw doctor
 openclaw gateway restart
 ```
 
-这个安装器会继续写入当前管理员用户的 `~/.openclaw` 前缀，不需要 `sudo`。普通 SSH 登录 shell 会自动导出 `OPENCLAW_GATEWAY_TOKEN`、`OPENCLAW_PUBLIC_URL` 和本机运行所需路径，但不会强制把 `OPENCLAW_GATEWAY_URL` 改成公网 `wss://` 地址；这样管理员在 gateway host 上执行 `openclaw` 时会保留官方推荐的本机 loopback 管理路径。这里显式使用 `bash -c` 而不是 `bash -lc`，避免在重跑 bootstrap/onboard 时再次触发 login shell 的 Homebrew 初始化，从而踩到“当前工作目录不存在”这类部署期错误。
+## 10.（可选）切换 Gateway 模式
 
-## 进阶：使用 Azure CLI 部署（替代方案）
-
-如果您熟悉命令行操作，也可以跳过网页一键部署，直接使用 Azure CLI 完成部署。此方式适合自动化脚本或不方便使用浏览器的场景。
-
-### 1. 登录 Azure 账号
+SSH 管理员默认走本机 loopback gateway。如需切到公网 `wss://` gateway 排查问题：
 ```bash
-az login
+openclaw-use-public-gateway
+```
+该 helper 会按这台 VM 的 current local device identity 去匹配并自动批准对应的 pending request，然后用 `openclaw health --verbose` 验证公网路径可用后才持久化切换。
+
+切回默认 loopback：
+```bash
+openclaw-use-loopback-gateway
 ```
 
-> **Azure 中国区用户：** 请先切换到 Azure China 环境再登录：
-> ```bash
-> az cloud set --name AzureChinaCloud
-> az login
-> ```
-
-### 2. 创建资源组
-在开始部署前，先指定一个位置（例如 `southeastasia`）来创建您的资源组：
+切换后需 reconnect SSH，运行以下命令确认：
 ```bash
-az group create --name rg-openclaw-sea --location southeastasia
+openclaw-gateway-mode current
 ```
-
-### 3. 执行部署命令
-在此命令中直接填入您的自定义参数。部署过程可能需要几分钟。
-
-如果您希望部署时同时配置 Azure OpenAI，请将 `azureOpenAiEndpoint`、`azureOpenAiDeployment`、`azureOpenAiApiKey` 三个参数一起填写；如果暂时不接入 Azure OpenAI，请将这三个参数一起省略。
-```bash
-az deployment group create \
-  --name openclaw-sea-20260307 \
-  --resource-group rg-openclaw-sea \
-  --template-uri https://raw.githubusercontent.com/hanhsia/openclaw-azure-deploy/main/azuredeploy.json \
-  --parameters \
-    vmName=openclaw-sea-20260307 \
-    location=southeastasia \
-    adminUsername=azureuser \
-    sshPublicKey="ssh-ed25519 AAAA..." \
-    vmSize=Standard_B2as_v2 \
-    azureOpenAiAuthMode=key \
-    azureOpenAiEndpoint="https://your-resource.cognitiveservices.azure.com/" \
-    azureOpenAiDeployment="gpt-5.2" \
-    azureOpenAiApiKey="replace-with-api-key"
-```
-
-如果您希望使用 **Managed Identity** 认证（推荐），只需将 `azureOpenAiAuthMode` 设为 `managedIdentity` 并省略 API Key：
-```bash
-az deployment group create \
-  --name openclaw-sea-20260307 \
-  --resource-group rg-openclaw-sea \
-  --template-uri https://raw.githubusercontent.com/hanhsia/openclaw-azure-deploy/main/azuredeploy.json \
-  --parameters \
-    vmName=openclaw-sea-20260307 \
-    location=southeastasia \
-    adminUsername=azureuser \
-    sshPublicKey="ssh-ed25519 AAAA..." \
-    vmSize=Standard_B2as_v2 \
-    azureOpenAiAuthMode=managedIdentity \
-    azureOpenAiEndpoint="https://your-resource.cognitiveservices.azure.com/" \
-    azureOpenAiDeployment="gpt-5.2"
-```
-
-使用 Managed Identity 模式时，部署完成后需要为 VM 分配 `Cognitive Services OpenAI User` 角色（见上方 Managed Identity 部署后配置说明）。
-
-### 4. 查看部署输出
-部署成功后，控制台会输出大量的 JSON 信息，您可以在输出结果底部找到 `outputs` 节点，里面包含虚拟机的公网域名（`vmPublicFqdn`）。
-如果您不小心清空了终端，可以随时通过以下命令再次查看部署输出：
-```bash
-az deployment group show \
-  --name openclaw-sea-20260307 \
-  --resource-group rg-openclaw-sea \
-  --query properties.outputs
-```
-拿到公网域名后，后续的步骤与上述的【3. 连接与初始化配置】完全相同。
-
-## 飞书配置（Azure China）
-
-在部署表单填写 `feishuAppId` 和 `feishuAppSecret` 之前，请先在飞书开放平台完成以下设置并获取 App ID / App Secret。完成后，再把这两个值填入部署表单；模板会自动把飞书通道写入 OpenClaw 配置，并启用 WebSocket 长连接模式，无需暴露公网 webhook。
-
-1. 创建企业自建应用，并获取 App ID / App Secret。
-2. 开启机器人能力。
-3. 为应用添加至少以下事件订阅：`im.message.receive_v1`。
-4. 在“事件订阅”中选择“使用长连接接收事件（WebSocket）”。
-5. 确保应用已经发布到可用版本。
-
-部署完成后，可在虚拟机中检查：
-
-```bash
-openclaw gateway status
-sudo cat /data/openclaw.json
-```
-
-## Microsoft Teams 配置（Azure Global）
-
-在部署表单填写 `msteamsAppId` 和 `msteamsAppPassword` 之前，请先在 Azure Global 中完成 Azure Bot / App Registration 准备。标准模式下，模板会自动使用当前 Azure tenant 作为 Teams 所需 tenant ID，因此无需单独填写 tenant ID。
-
-1. 在 Azure Global 中创建 Azure Bot，并准备 Bot 使用的 App ID / App Password。
-2. 在部署表单中填写 `msteamsAppId` 和 `msteamsAppPassword`。
-3. 模板会自动：
-  - 创建 Azure Bot 资源并启用 Teams channel
-  - 将 Teams 通道配置写入 OpenClaw
-  - 通过 Caddy 暴露 `https://<你的域名>/api/messages`
-4. 部署完成后，您仍需在 Teams 侧单独完成 Teams app manifest/package 的上传与安装。
-
-部署完成后，可在虚拟机中检查：
-
-```bash
-openclaw plugins list
-openclaw gateway status
-sudo cat /data/openclaw.json
-```
-
-如果你要继续做 Teams 手工联调和验收，参考 [tests/TEAMS_TESTING.md](/c:/Users/hanxia/repos/openclaw-azure-deploy/tests/TEAMS_TESTING.md)。文档里已经包含当前已验证的最小手测闭环，以及 `openclaw-approve-teams-pairing` 无参批准的操作方式。
 
 ## 常见问题
 
-### 1. SSH 报错 `Permission denied (publickey)`
-**原因：** 您使用的私钥与提供给 Azure 的公钥不匹配，或者您没有使用 `-i` 参数指定正确的私钥路径。  
-**解决办法：** 
-- 确保部署时粘贴的公钥内容（`.pub`）与您当前使用的私钥是一对。
-- 如果您在 Azure 门户下载了 `.pem` 文件，登录时请通过 `-i` 参数明确指定：
-  ```bash
-  ssh -i <你的私钥文件路径.pem> azureuser@<vmPublicFqdn>
-  ```
+**SSH 报错 `Permission denied (publickey)`**
+> 私钥与部署时使用的公钥不匹配。确保使用 `-i` 指定正确的私钥文件。
 
-### 2. SSH 报错 `UNPROTECTED PRIVATE KEY FILE` 或者 `Permissions 0644 for ... are too open`
-**原因：** 您的私钥文件权限过于宽松，SSH 客户端出于安全考虑拒绝使用它。  
-**解决办法：**  
-- **Windows 用户：** 在 PowerShell 中执行以下命令（假设您的私钥名为 `openclaw-key.pem`）：
-  ```powershell
-  $Key = "$env:USERPROFILE\.ssh\openclaw-key.pem"
-  icacls $Key /inheritance:r
-  icacls $Key /remove:g "Users" "Authenticated Users" "Everyone" "BUILTIN\Administrators"
-  icacls $Key /grant:r "${env:USERNAME}:R"
-  ```
-- **Mac / Linux 用户：** 在终端中执行以下命令限制权限：
-  ```bash
-  chmod 600 ~/.ssh/openclaw-key.pem
-  ```
+**SSH 报错 `UNPROTECTED PRIVATE KEY FILE`**
+> 私钥文件权限过宽。Windows 执行 `icacls $Key /inheritance:r` 等命令修复；macOS/Linux 执行 `chmod 600 <私钥文件>`。
 
-### 3. SSH 报错 `REMOTE HOST IDENTIFICATION HAS CHANGED!`
-**原因：** 您当前连接的域名在本机 `known_hosts` 中已经保存过旧的主机指纹，但这台虚拟机可能已经被删除重建、重新部署过系统，或者同一个域名现在指向了另一台机器，因此 SSH 发现远端主机密钥发生了变化。  
-**解决办法：**  
-- 如果这台虚拟机确实是您刚刚重新部署或重建的，可以先删除本机保存的旧记录，再重新连接：
-  ```powershell
-  ssh-keygen -R <vmPublicFqdn>
-  ssh -i "$env:USERPROFILE\.ssh\id_ed25519" azureuser@<vmPublicFqdn>
-  ```
-- 第一次重新连接时，SSH 会提示您确认新的主机指纹，确认无误后输入 `yes` 即可。
-- 如果这台机器并不是您刚刚重建的，请不要直接忽略该警告，而应先确认域名和公网 IP 是否仍然对应您自己的虚拟机。
+**SSH 报错 `REMOTE HOST IDENTIFICATION HAS CHANGED!`**
+> VM 重建导致主机指纹变化。执行 `ssh-keygen -R <vmPublicFqdn>` 后重新连接。
 
-### 4. 如何找到 `gateway token`（网关令牌）缺少的提示？
-**原因：** OpenClaw 面板采用了基于 Token 的安全验证，不允许直接通过裸域名访问，直接输入 URL 时会被拒绝。  
-**解决办法：**  
-切勿手动猜测或输入 Token。请 SSH 登录进虚拟机，在远程终端中直接运行：
-```bash
-openclaw-browser-url
-```
-它会直接输出完整的 `https://.../#token=...` 链接，复制整段带有 token 的 URL 在浏览器中打开即可。
+**浏览器报错 `502 Bad Gateway`**
+> 部署刚完成时，请等待 1-2 分钟。如持续报错，SSH 登录 VM 执行：
+> ```bash
+> sudo systemctl status openclaw-gateway caddy --no-pager
+> sudo journalctl -u openclaw-gateway -n 100 --no-pager
+> ```
 
-### 5. 浏览器显示 `pairing required`（需要设备配对）
-**原因：** 为了安全限制，您的浏览器设备作为一个新的客户端首次连接网关时，需要进行管理员授权。  
-**解决办法：**  
-保持该浏览器页面不要关闭，此时切回虚拟机的 SSH 终端，执行以下命令进行授权：
-```bash
-openclaw-approve-browser
-```
-该 helper 会直接读取本机的浏览器配对队列并批准最新的 Control UI 请求，不依赖 `openclaw devices list/approve` 这条 RPC 路径。如果脚本提示当前没有待处理的浏览器配对请求，请保持浏览器停留在配对页面，等待几秒后重试。
-补充说明：OpenClaw 上游 `2026.3.12` 到 `2026.3.13` 期间存在已知的 loopback WebSocket 握手回归，某些机器上 `openclaw devices list` 可能会报 `gateway closed (1000 normal closure): no close reason`，即使 `openclaw gateway status` 和 `openclaw gateway call device.pair.list --json --params "{}"` 仍然正常。这个 Azure 模板目前不内置 monkey patch，而是避开这条已知不稳定的 wrapper 路径，等待上游正式修复版本。
-命令执行完毕后，回到浏览器刷新页面即可直接进入面板。
+**无法连接虚拟机（Connection Timed Out）**
+> 在 Azure 门户确认 VM 处于 Running 状态、已分配公网 IP，且 NSG 允许 22 和 443 端口入站。
 
-### 6. 浏览器访问报错 `502 Bad Gateway`
-**原因：** 部署尚未完全结束，或者宿主机上的 OpenClaw Gateway / Caddy 服务未成功启动，或正在重启中。  
-**解决办法：**  
-1. 刚刚部署完毕时，请等待 1-2 分钟让组件完全启动。
-2. 如果持续报错，请登录至虚拟机排查服务状态：
-  ```bash
-  # 查看 OpenClaw 和 Caddy 服务状态
-  sudo systemctl status openclaw-gateway caddy --no-pager
-
-  # 查看 OpenClaw Gateway 的最近日志
-  sudo journalctl -u openclaw-gateway -n 100 --no-pager
-
-  # 查看 Caddy 的最近日志
-  sudo journalctl -u caddy -n 100 --no-pager
-  ```
-
-### 7. 无法连接虚拟机（Connection Timed Out）
-**原因：** 虚拟机实例没有成功获取公网 IP，或者其 22 / 443 端口被安全组（NSG）阻挡。  
-**解决办法：**  
-- 在 Azure 门户中前往您刚刚部署的**虚拟机**页面。
-- 检查处于 `Running(正在运行)` 状态，并且确认分配到了 Public IP。
-- 点击左侧的**网络 (Networking)**，确保入站端口规则 (Inbound port rules) 允许了 `22` (SSH) 和 `443` (HTTPS) 端口。
+> **环境说明：** 模板会为管理员用户预装 Homebrew 到 `/home/linuxbrew/.linuxbrew` 并配置 passwordless sudo。VM 作为管理员专用主机使用。
 
 ---
 
 <a id="en"></a>
 # English Deployment Guide
 
-This guide walks you through the full OpenClaw deployment process on Azure. After deployment finishes, you will have a configured Ubuntu virtual machine, a persistent data disk, an automatically assigned public domain name, and HTTPS access.
+## 1. Prepare SSH Keys
 
-## 1. Prepare Deployment Information
+Skip this step if you already have an SSH key pair.
 
-Before you begin, prepare the following:
+**Windows (PowerShell):**
+```powershell
+ssh-keygen -t ed25519 -C "openclaw-azure"
+Get-Content $env:USERPROFILE\.ssh\id_ed25519.pub
+```
 
-- **SSH Public Key**: used to log in to the virtual machine later
+**macOS / Linux:**
+```bash
+ssh-keygen -t ed25519 -C "openclaw-azure"
+cat ~/.ssh/id_ed25519.pub
+```
 
-If you want Azure OpenAI configured during deployment, you can choose one of two authentication modes:
+Copy the public key output — you will paste it into the deployment form later.
 
-**Option A — API Key (traditional):**
-- **Azure OpenAI Endpoint**: for example `https://your-resource.cognitiveservices.azure.com/`
-- **Deployment Name**: the model deployment name in Azure OpenAI, for example `gpt-4o`
-- **API Key**: your Azure OpenAI access key
+## 2. (Optional) Prepare Azure OpenAI Information
 
-**Option B — Managed Identity (recommended, Entra ID):**
-- **Azure OpenAI Endpoint**: same as above
-- **Deployment Name**: same as above
-- No API key required. The template deploys a local token proxy on the VM that uses the VM's system-assigned managed identity to automatically obtain and refresh Azure OpenAI access tokens. **The template automatically attempts to assign the `Cognitive Services OpenAI User` role to the VM's managed identity**; if the deploying user lacks sufficient permissions, the deployment will fail with an error that includes the Azure CLI command for manual assignment (see instructions below).
+If you want Azure OpenAI ready immediately after deployment, prepare the following based on your chosen authentication mode:
 
-These Azure OpenAI parameters must be consistent: provide the endpoint and deployment name together (and optionally an API key if using API Key mode), or leave everything empty to skip Azure OpenAI setup.
+| Parameter | API Key Mode | Managed Identity Mode (Recommended) |
+|-----------|-------------|-------------------------------------|
+| Azure OpenAI Endpoint | Required | Required |
+| Deployment Name | Required | Required |
+| API Key | Required | Not needed |
+| Azure OpenAI Resource Group | When cross-resource-group | When cross-resource-group |
 
-If you want Feishu connected during deployment with the WebSocket long-connection mode, first finish the Feishu Open Platform app setup and obtain the following:
+In Managed Identity mode, the template automatically attempts to assign the `Cognitive Services OpenAI User` role to the VM. If the deploying user lacks sufficient permissions, the role assignment fails but the VM and OpenClaw are fully deployed and functional (the Azure portal may show the deployment as "partially failed"). Just assign the role manually afterward — no redeployment needed (see Step 5).
 
-- **Feishu App ID**: the Feishu app App ID, for example `cli_xxx`
-- **Feishu App Secret**: the Feishu app App Secret
+Leave all Azure OpenAI fields empty to skip.
 
-These two Feishu parameters must either both be provided or both be left empty.
+## 3. (Optional) Prepare Channel Integration Information
 
-If you want Microsoft Teams connected during deployment in standard mode, prepare the following:
+**Feishu (Azure China / Azure Global):** Create a self-built enterprise app on the Feishu Open Platform, enable bot capability, add the `im.message.receive_v1` event subscription with WebSocket long-connection mode, publish the app, then obtain:
+- **Feishu App ID** and **Feishu App Secret** (provide both or leave both empty)
 
-- **Teams Bot App ID**: the application ID used by your Microsoft Entra / Azure Bot registration
-- **Teams Bot App Password**: the client secret value for that application
+**Microsoft Teams (Azure Global only):** Create an Azure Bot / App Registration, then obtain:
+- **Teams Bot App ID** and **Teams Bot App Password** (provide both or leave both empty)
 
-Teams standard mode currently supports **Azure Global only** and does not support **Azure China**. The template automatically uses the current Azure tenant as the tenant ID required by Teams, so you do not need to enter a tenant ID manually.
+The template automatically uses the current Azure tenant as the Teams tenant ID.
 
-These two Teams parameters must either both be provided or both be left empty.
+## 4. Deploy to Azure
 
-If you do not have an SSH key pair yet, you can generate one by following the operating-system-specific instructions below.
+### Option A: One-Click Deployment (Recommended)
 
-## 2. One-Click Deployment Workflow
+1. Click a **Deploy to Azure** button above and sign in.
+2. Select or create a **Resource Group**.
+3. Fill in the form parameters:
+   - `vmName`: virtual machine name
+   - `adminUsername`: SSH username (default `azureuser`)
+   - `sshPublicKey`: paste the SSH public key from Step 1
+   - `vmSize`: virtual machine size (default `Standard_B2as_v2`)
+   - Azure OpenAI parameters (optional, see Step 2)
+   - Feishu / Teams channel parameters (optional, see Step 3)
+4. Click **Review + create** → **Create** and wait for deployment to finish.
+5. After deployment, open **Outputs** on the left and note:
+   - `vmPublicFqdn`: public domain name (for SSH login)
+   - `vmPrincipalId`: VM managed identity ID (needed for Managed Identity mode)
 
-1. Click the **Deploy to Azure** button above.
-2. Sign in to your Azure account.
-3. On the deployment page, select or create a **Resource Group**.
-4. Fill in the deployment parameters:
-   - `vmName`: your custom virtual machine name, for example `openclaw-prod-001`
-   - `adminUsername`: SSH login username, default is `azureuser`
-   - `sshPublicKey`: paste the content of your SSH **public key** `.pub` file, not the private key
-   - `vmSize`: virtual machine size, for example `Standard_B2as_v2`
-   - `azureOpenAiEndpoint`: optional, your Azure OpenAI endpoint
-   - `azureOpenAiDeployment`: optional, your Azure OpenAI deployment name
-   - `azureOpenAiApiKey`: optional, your Azure OpenAI API key (only required for API Key mode)
-   - Azure OpenAI authentication mode: select API Key or Managed Identity in the portal form; select None to skip
-   - `feishuAppId`: optional, your Feishu app App ID
-   - `feishuAppSecret`: optional, your Feishu app App Secret
-   - `msteamsAppId`: optional, your Microsoft Teams Bot App ID, Azure Global only
-   - `msteamsAppPassword`: optional, your Microsoft Teams Bot App Password, Azure Global only
-   - The Azure OpenAI parameters required depend on the authentication mode: API Key mode requires all three; Managed Identity mode requires only the endpoint and deployment name
-   - The two Feishu parameters above must either both be provided or both be left empty
-   - The two Teams parameters above must either both be provided or both be left empty; the tenant ID is automatically taken from the current Azure tenant
-5. Click **Review + create**, then click **Create** to submit the deployment.
-6. Wait for deployment to finish. In particular, wait until all resources, especially the `openclaw-bootstrap` extension, show as successfully deployed.
-7. After deployment finishes, open **Outputs** on the left and record the following:
-   - `vmPublicFqdn` (the public VM domain name used later for SSH login)
-   - `vmPrincipalId` (if you chose Managed Identity mode, you will need this to assign the RBAC role)
-
-### Post-Deployment Setup for Managed Identity (Only If You Chose Managed Identity Mode)
-
-If you selected **Managed Identity (Entra ID)** authentication during deployment, the template **automatically attempts** to assign the `Cognitive Services OpenAI User` role to the VM's managed identity.
-
-- **When permissions are sufficient (Owner / User Access Administrator):** The role is assigned automatically. No further action needed.
-- **When permissions are insufficient (e.g. Contributor):** The deployment will fail with an `AuthorizationFailed` error. Manually assign the role (see below), then redeploy, or ask an administrator with sufficient permissions to assign it.
-- The deployment output `azureOpenAiRoleAssignmentHint` contains the full Azure CLI command for manual assignment.
-- If your Azure OpenAI resource is in a different resource group from this deployment, enter the Azure OpenAI resource group name in the deployment form.
-
-#### Manual Role Assignment (When Permissions Are Insufficient)
-
-##### Via Azure Portal
-
-1. Open the Azure portal and navigate to your **Azure OpenAI resource** (or its parent Cognitive Services account).
-2. Select **Access control (IAM)** from the left menu.
-3. Click **Add** → **Add role assignment**.
-4. Select the role **Cognitive Services OpenAI User**.
-5. Under "Members", choose **Managed identity**, then search for and select the virtual machine you deployed.
-6. Click **Review + assign** to finish.
-
-##### Via Azure CLI
+### Option B: Azure CLI Deployment
 
 ```bash
-# Get the VM principal ID from the deployment outputs (or substitute the vmPrincipalId output value)
+# Azure China users first run: az cloud set --name AzureChinaCloud
+az login
+
+az group create --name rg-openclaw --location southeastasia
+
+# API Key mode
+az deployment group create \
+  --name openclaw-deploy \
+  --resource-group rg-openclaw \
+  --template-uri https://raw.githubusercontent.com/hanhsia/openclaw-azure-deploy/openaiauth/azuredeploy.json \
+  --parameters \
+    vmName=my-openclaw \
+    sshPublicKey="ssh-ed25519 AAAA..." \
+    azureOpenAiAuthMode=key \
+    azureOpenAiEndpoint="https://your-resource.cognitiveservices.azure.com/" \
+    azureOpenAiDeployment="gpt-5.2" \
+    azureOpenAiApiKey="your-api-key"
+
+# Managed Identity mode (recommended): omit azureOpenAiApiKey, set azureOpenAiAuthMode=managedIdentity
+# Skip Azure OpenAI: omit all azureOpenAi* parameters
+```
+
+View deployment outputs:
+```bash
+az deployment group show \
+  --name openclaw-deploy \
+  --resource-group rg-openclaw \
+  --query properties.outputs
+```
+
+## 5. (Managed Identity Mode) Post-Deployment Role Assignment
+
+If you chose Managed Identity authentication, the template **automatically attempts** to assign the `Cognitive Services OpenAI User` role to the VM's managed identity.
+
+- **When permissions are sufficient (Owner / User Access Administrator):** The role is assigned automatically. No further action needed.
+- **When permissions are insufficient (e.g. Contributor):** The role assignment fails, and the Azure portal may show the deployment as "partially failed". However, **the VM, OpenClaw, and MI proxy service are all fully functional** — no redeployment is needed. Just assign the role manually, and the next chat request will work immediately.
+
+The deployment output `azureOpenAiRoleAssignmentHint` contains the exact `az role assignment create` command you can copy and run.
+
+**Via Azure Portal:**
+1. Open your Azure OpenAI resource → **Access control (IAM)** → **Add role assignment**.
+2. Select role **Cognitive Services OpenAI User**, choose **Managed identity**, search for your VM.
+3. **Review + assign**.
+
+**Via Azure CLI:**
+```bash
 vm_principal_id=$(az deployment group show \
   --name <deployment-name> \
   --resource-group <resource-group> \
   --query properties.outputs.vmPrincipalId.value -o tsv)
 
-# Assign the Cognitive Services OpenAI User role to the VM
 az role assignment create \
   --assignee "$vm_principal_id" \
   --role "Cognitive Services OpenAI User" \
   --scope "/subscriptions/<subscription-id>/resourceGroups/<resource-group>/providers/Microsoft.CognitiveServices/accounts/<openai-resource-name>"
 ```
 
-> **Note:** The user running `az role assignment create` must have the Owner, User Access Administrator, or Role Based Access Control Administrator role. The Contributor role cannot assign roles.
+> The user running this command needs the Owner, User Access Administrator, or Role Based Access Control Administrator role. Once the role is assigned, the next chat request will work immediately.
 
-## 3. Connect and Complete Initial Setup
+## 6. SSH into the Virtual Machine
 
-Depending on your operating system, follow the steps below to log in to the virtual machine and obtain the access token. After you sign in, you can use the `openclaw` command directly on the VM. This template follows OpenClaw's recommended host-local admin model: the administrator SSH shell keeps the CLI on the VM's local loopback gateway, while browsers and other remote clients still reach the same gateway through the public HTTPS/WSS entrypoint. That keeps one shared gateway, one shared config, and one shared session store.
-
-### Windows
-
-#### Prepare SSH keys
-If you do not have SSH keys yet, run the following command in PowerShell to generate a new key pair:
-```powershell
-ssh-keygen -t ed25519 -C "openclaw-azure"
-```
-
-After the key pair is created, run the following command to print the public key, then paste it into the Azure deployment form:
-```powershell
-Get-Content $env:USERPROFILE\.ssh\id_ed25519.pub
-```
-
-#### SSH into the virtual machine
-Use your SSH private key, for example `id_ed25519`, to connect to the VM:
+**Windows (PowerShell):**
 ```powershell
 ssh -i "$env:USERPROFILE\.ssh\id_ed25519" azureuser@<vmPublicFqdn>
 ```
-*(Replace `<vmPublicFqdn>` with the domain name shown in the deployment outputs. Adjust the key path or file name if needed.)*
 
-#### Get the web dashboard URL
-After you log in successfully, run this in the remote shell on the Azure virtual machine, not in your local repo terminal:
-```bash
-openclaw-browser-url
-```
-Example output:
-```text
-Dashboard URL: https://your-hostname/#token=...
-```
-Copy the full URL and open it in your browser.
-
-#### Authorize browser pairing
-If the browser page shows `pairing required`, keep the page open, return to your SSH terminal, and run:
-```bash
-openclaw-approve-browser
-```
-This helper reads the local browser pairing queue directly and approves the newest Control UI request. If it says there is no pending browser pairing request, keep the dashboard on the pairing page, wait a few seconds, and run it again.
-Known upstream note: OpenClaw `2026.3.12` through `2026.3.13` has a reported loopback WebSocket handshake regression on some hosts. In that window, `openclaw devices list` can fail with `gateway closed (1000 normal closure): no close reason` even while `openclaw gateway status` and `openclaw gateway call device.pair.list --json --params "{}"` still succeed. This Azure template does not bake in a runtime monkey patch for that upstream bug; it avoids depending on the unstable wrapper path until an upstream release ships the fix.
-After the command finishes, refresh the browser page to complete sign-in.
-
-This template keeps the shared gateway token in `/etc/openclaw/openclaw.env` and auto-exports it for the deployment's administrator SSH login shell, but it does not force `OPENCLAW_GATEWAY_URL` to the public `wss://` endpoint for host-local administration. That matches OpenClaw's documented model: manage the gateway locally from the gateway host, and let browsers or other remote devices connect through the public entrypoint with their own pairing records. Because every client still talks to the same gateway on the same Azure VM, they continue to share the same session/workspace state.
-
-If you need to temporarily point the SSH CLI at the public `wss://` gateway, run:
-```bash
-openclaw-use-public-gateway
-```
-This helper first checks whether the SSH CLI is already paired against the public `wss://` gateway. If not, it matches the pending request for this VM's current local device identity, automatically approves it, validates the public path with `openclaw health --verbose`, and only then persists the switch.
-To return to the default loopback path, run:
-```bash
-openclaw-use-loopback-gateway
-```
-The selected mode is persisted for future login shells, so reconnect SSH after switching and confirm it with:
-```bash
-openclaw-gateway-mode current
-```
-
----
-
-### macOS / Linux
-
-#### Prepare SSH keys
-If you do not have SSH keys yet, first run the following command to generate a new key pair:
-```bash
-ssh-keygen -t ed25519 -C "openclaw-azure"
-```
-
-After that, run the following command to print the public key, then paste the full line into the Azure form:
-```bash
-cat ~/.ssh/id_ed25519.pub
-```
-
-#### SSH into the virtual machine
+**macOS / Linux:**
 ```bash
 ssh -i ~/.ssh/id_ed25519 azureuser@<vmPublicFqdn>
 ```
-*(Replace `<vmPublicFqdn>` with the domain name shown in the deployment outputs.)*
 
-#### Get the web dashboard URL
-After you log in successfully, run this in the remote shell on the Azure virtual machine, not in your local repo terminal:
+Replace `<vmPublicFqdn>` with the domain name from the deployment outputs.
+
+## 7. Get the Web Dashboard URL
+
+After SSH login, run:
 ```bash
 openclaw-browser-url
 ```
-Copy the full Dashboard URL from the terminal output and open it in your browser.
 
-#### Authorize browser pairing
-If the browser page asks for pairing approval, run:
+Example output:
+```
+Dashboard URL: https://your-hostname/#token=...
+```
+
+Copy the full URL and open it in your browser.
+
+## 8. Authorize Browser Pairing
+
+If the browser shows `pairing required`, **keep the page open**, return to SSH and run:
 ```bash
 openclaw-approve-browser
 ```
-This helper reads the local browser pairing queue directly and approves the newest Control UI request. If it says there is no pending browser pairing request, keep the dashboard on the pairing page, wait a few seconds, and run it again.
-Known upstream note: OpenClaw `2026.3.12` through `2026.3.13` has a reported loopback WebSocket handshake regression on some hosts. In that window, `openclaw devices list` can fail with `gateway closed (1000 normal closure): no close reason` even while `openclaw gateway status` and `openclaw gateway call device.pair.list --json --params "{}"` still succeed. This Azure template does not bake in a runtime monkey patch for that upstream bug; it avoids depending on the unstable wrapper path until an upstream release ships the fix.
-Then return to the browser and refresh the page to start using OpenClaw.
 
-If you need to troubleshoot through the public `wss://` endpoint from SSH, switch the login-shell default with:
-```bash
-openclaw-use-public-gateway
-```
-This helper first checks whether the SSH CLI is already paired against the public `wss://` gateway. If not, it matches the pending request for this VM's current local device identity, automatically approves it, validates the public path with `openclaw health --verbose`, and only then makes the public `wss://` path the login-shell default.
-To switch back to the default loopback path:
-```bash
-openclaw-use-loopback-gateway
-```
-Reconnect SSH after the change, then run `openclaw-gateway-mode current` to verify the active mode.
+This helper reads the local browser pairing queue directly and approves the newest Control UI request. If it reports no pending request, keep the browser on the pairing page, wait a few seconds, and retry. After the command succeeds, refresh the browser page.
 
-## 4. Updating Later
+> Known upstream note: OpenClaw `2026.3.12` through `2026.3.13` has a reported loopback WebSocket handshake regression on some hosts. The `openclaw-approve-browser` helper avoids that code path.
 
-This template uses OpenClaw's recommended **non-interactive three-step install path** on the VM: first the **official `install-cli.sh` installer** places the CLI and its dedicated Node runtime under the `adminUsername` user's `~/.openclaw` prefix, then `openclaw onboard --non-interactive --install-daemon` installs the local gateway service, and finally the same bootstrap script applies the Azure-provided model and channel settings through `openclaw config`. The template currently pins the latest stable Node release, `24.14.0`, instead of depending on a system-wide `/usr` Node/npm install. That stays closer to the upstream no-root CLI installation path and still lets the SSH administrator user run `openclaw update` directly without hitting `EACCES` on `/usr/lib/node_modules`.
+## 9. (Optional) Updating Later
 
-After deployment, when you want to upgrade OpenClaw on the VM, prefer:
+This template uses the official `install-cli.sh` installer to place the CLI and its dedicated Node runtime under the user's `~/.openclaw` prefix, then runs `openclaw onboard --non-interactive --install-daemon` to install the gateway service, and finally applies Azure-provided settings through `openclaw config`.
 
 ```bash
 openclaw update
@@ -692,16 +421,14 @@ openclaw doctor
 openclaw gateway restart
 ```
 
-If you enabled Microsoft Teams, note one extra caveat: after `openclaw update` or an explicit reinstall, the upstream core package can replace the installed `extensions/msteams` directory without rerunning the Azure bootstrap step that installs the bundled extension's npm dependencies. When that happens, the Teams channel can start failing with `Cannot find module '@microsoft/agents-hosting'`, which usually shows up as the bot not replying and `openclaw-approve-teams-pairing` seeing no new pending request. If that happens, reinstall the Teams extension dependencies on the VM and restart the gateway:
-
+If Teams is enabled, you may need to reinstall extension dependencies after updating:
 ```bash
 export PATH="$HOME/.openclaw/tools/node/bin:$HOME/.openclaw/bin:$PATH"
 npm install --omit=dev --prefix "$HOME/.openclaw/lib/node_modules/openclaw/extensions/msteams"
 systemctl --user restart openclaw-gateway
 ```
 
-If you want to rerun the installer explicitly instead, you can also run:
-
+To rerun the installer from scratch:
 ```bash
 curl -fsSL https://openclaw.ai/install-cli.sh | bash -s -- --prefix "$HOME/.openclaw" --node-version 24.14.0 --no-onboard
 bash -c '. /etc/openclaw/openclaw.env && openclaw onboard --non-interactive --accept-risk --mode local --workspace /data/workspace --auth-choice skip --gateway-port "$OPENCLAW_GATEWAY_PORT" --gateway-bind loopback --gateway-auth token --gateway-token "$OPENCLAW_GATEWAY_TOKEN" --install-daemon --daemon-runtime node --skip-channels --skip-skills'
@@ -710,199 +437,41 @@ openclaw doctor
 openclaw gateway restart
 ```
 
-If you copied that command from an older README revision, replace `--gateway-token-ref-env OPENCLAW_GATEWAY_TOKEN` with `--gateway-token "$OPENCLAW_GATEWAY_TOKEN"`; otherwise the reinstall will keep writing `gateway.auth.token` as a SecretRef and reintroduce the dashboard URL and Control UI save regression.
+## 10. (Optional) Switch Gateway Mode
 
-That installer writes into the administrator user's `~/.openclaw` prefix, so `sudo` is not required. The rerun commands intentionally use `bash -c` instead of `bash -lc` so they do not depend on login-shell profile startup during recovery. A normal SSH login shell for that administrator user still auto-exports `OPENCLAW_GATEWAY_TOKEN` and `OPENCLAW_PUBLIC_URL`, but leaves `OPENCLAW_GATEWAY_URL` unset so host-local CLI management stays on the official local loopback path.
-
-## Advanced: Deploy with Azure CLI (Alternative)
-
-If you prefer the command line, you can skip the web-based one-click deployment and deploy directly with Azure CLI. This is useful for automation or when using a browser is inconvenient.
-
-### 1. Sign in to Azure
+The SSH admin shell uses the local loopback gateway by default. To switch to the public `wss://` gateway for troubleshooting:
 ```bash
-az login
+openclaw-use-public-gateway
+```
+This helper matches the pending request for this VM's current local device identity, automatically approves it, validates the public path with `openclaw health --verbose`, and only then persists the switch.
+
+Switch back to the default loopback:
+```bash
+openclaw-use-loopback-gateway
 ```
 
-> **Azure China users:** Switch to the Azure China environment before signing in:
-> ```bash
-> az cloud set --name AzureChinaCloud
-> az login
-> ```
-
-### 2. Create a resource group
-Before deployment, choose a location such as `southeastasia` and create a resource group:
+Reconnect SSH after switching and confirm with:
 ```bash
-az group create --name rg-openclaw-sea --location southeastasia
+openclaw-gateway-mode current
 ```
-
-### 3. Run the deployment command
-Fill in your custom parameters directly in the command below. Deployment may take a few minutes.
-
-If you want Azure OpenAI configured during deployment, provide `azureOpenAiEndpoint`, `azureOpenAiDeployment`, and `azureOpenAiApiKey` together. If you do not want Azure OpenAI configured yet, omit all three together.
-```bash
-az deployment group create \
-  --name openclaw-sea-20260307 \
-  --resource-group rg-openclaw-sea \
-  --template-uri https://raw.githubusercontent.com/hanhsia/openclaw-azure-deploy/main/azuredeploy.json \
-  --parameters \
-    vmName=openclaw-sea-20260307 \
-    location=southeastasia \
-    adminUsername=azureuser \
-    sshPublicKey="ssh-ed25519 AAAA..." \
-    vmSize=Standard_B2as_v2 \
-    azureOpenAiAuthMode=key \
-    azureOpenAiEndpoint="https://your-resource.cognitiveservices.azure.com/" \
-    azureOpenAiDeployment="gpt-5.2" \
-    azureOpenAiApiKey="replace-with-api-key"
-```
-
-To use **Managed Identity** authentication (recommended), set `azureOpenAiAuthMode` to `managedIdentity` and omit the API key:
-```bash
-az deployment group create \
-  --name openclaw-sea-20260307 \
-  --resource-group rg-openclaw-sea \
-  --template-uri https://raw.githubusercontent.com/hanhsia/openclaw-azure-deploy/main/azuredeploy.json \
-  --parameters \
-    vmName=openclaw-sea-20260307 \
-    location=southeastasia \
-    adminUsername=azureuser \
-    sshPublicKey="ssh-ed25519 AAAA..." \
-    vmSize=Standard_B2as_v2 \
-    azureOpenAiAuthMode=managedIdentity \
-    azureOpenAiEndpoint="https://your-resource.cognitiveservices.azure.com/" \
-    azureOpenAiDeployment="gpt-5.2"
-```
-
-When using Managed Identity mode, assign the `Cognitive Services OpenAI User` role to the VM after deployment (see the post-deployment setup section above).
-
-### 4. View deployment outputs
-After the deployment succeeds, the console prints a large JSON object. In the `outputs` section near the bottom, you can find the VM public domain name `vmPublicFqdn`.
-If you cleared the terminal, you can retrieve the deployment outputs again with:
-```bash
-az deployment group show \
-  --name openclaw-sea-20260307 \
-  --resource-group rg-openclaw-sea \
-  --query properties.outputs
-```
-After you obtain the public domain name, the remaining steps are the same as in **3. Connect and Complete Initial Setup** above.
-
-## Feishu Setup (Azure China)
-
-Before you enter `feishuAppId` and `feishuAppSecret` in the deployment form, complete the following Feishu Open Platform setup and obtain the App ID and App Secret. After that, enter those two values in the form; the template writes the Feishu channel configuration into OpenClaw automatically and uses the WebSocket long-connection mode, so no public webhook is required.
-
-1. Create a self-built enterprise app and copy the App ID and App Secret.
-2. Enable the bot capability.
-3. Add at least the `im.message.receive_v1` event subscription.
-4. In Event Subscription, choose the WebSocket long-connection mode.
-5. Publish the app version.
-
-After deployment, you can verify the channel on the VM:
-
-```bash
-openclaw gateway status
-sudo cat /data/openclaw.json
-```
-
-## Microsoft Teams Setup (Azure Global)
-
-Before you enter `msteamsAppId` and `msteamsAppPassword` in the deployment form, prepare your Azure Bot / App Registration in Azure Global first. In standard mode, the template automatically uses the current Azure tenant as the tenant ID required by Teams, so you do not need to enter a tenant ID separately.
-
-1. Create an Azure Bot in Azure Global and prepare the Bot App ID / App Password.
-2. Enter `msteamsAppId` and `msteamsAppPassword` in the deployment form.
-3. The template automatically:
-  - creates the Azure Bot resource and enables the Teams channel
-  - writes the Teams channel configuration into OpenClaw
-  - exposes `https://<your-hostname>/api/messages` through Caddy
-4. After deployment, you still need to upload and install the Teams app manifest/package on the Teams side.
-
-After deployment, you can verify the setup on the VM:
-
-```bash
-openclaw plugins list
-openclaw gateway status
-sudo cat /data/openclaw.json
-```
-
-If you want to continue with manual Teams validation after deployment, see [tests/TEAMS_TESTING.md](/c:/Users/hanxia/repos/openclaw-azure-deploy/tests/TEAMS_TESTING.md). It includes the currently verified minimal manual flow and the no-argument approval path for `openclaw-approve-teams-pairing`.
 
 ## FAQ
 
-### 1. SSH reports `Permission denied (publickey)`
-**Cause:** The private key you are using does not match the public key you provided to Azure, or you did not use `-i` to point to the correct private key file.  
-**Resolution:**
-- Make sure the public key content you pasted during deployment matches the private key you are using now.
-- If you downloaded a `.pem` file from Azure portal, specify it explicitly when connecting:
-  ```bash
-  ssh -i <path-to-your-private-key.pem> azureuser@<vmPublicFqdn>
-  ```
+**SSH reports `Permission denied (publickey)`**
+> The private key does not match the public key used during deployment. Use `-i` to specify the correct private key file.
 
-### 2. SSH reports `UNPROTECTED PRIVATE KEY FILE` or `Permissions 0644 for ... are too open`
-**Cause:** Your private key file permissions are too broad, so the SSH client refuses to use it for security reasons.  
-**Resolution:**
-- **Windows:** Run the following commands in PowerShell, assuming the private key file is named `openclaw-key.pem`:
-  ```powershell
-  $Key = "$env:USERPROFILE\.ssh\openclaw-key.pem"
-  icacls $Key /inheritance:r
-  icacls $Key /remove:g "Users" "Authenticated Users" "Everyone" "BUILTIN\Administrators"
-  icacls $Key /grant:r "${env:USERNAME}:R"
-  ```
-- **Mac / Linux:** Restrict permissions in the terminal:
-  ```bash
-  chmod 600 ~/.ssh/openclaw-key.pem
-  ```
+**SSH reports `UNPROTECTED PRIVATE KEY FILE`**
+> Private key file permissions are too broad. On Windows, run `icacls $Key /inheritance:r` and related commands; on macOS/Linux, run `chmod 600 <key-file>`.
 
-After you log in, the template-provisioned admin user already has Linux Homebrew installed at `/home/linuxbrew/.linuxbrew`, and login shells load it automatically via `/etc/profile.d/linuxbrew.sh`. The same admin user is also granted passwordless sudo through a dedicated sudoers drop-in, so `sudo ...` commands do not prompt for a password. Treat the VM as a trusted admin box, not a shared low-privilege shell host.
+**SSH reports `REMOTE HOST IDENTIFICATION HAS CHANGED!`**
+> The VM was recreated and the host fingerprint changed. Run `ssh-keygen -R <vmPublicFqdn>` then reconnect.
 
-### 3. SSH reports `REMOTE HOST IDENTIFICATION HAS CHANGED!`
-**Cause:** Your local `known_hosts` file already contains an older host fingerprint for this domain name, but the virtual machine may have been deleted and recreated, reprovisioned, or the same domain name may now point to a different machine. SSH therefore detects that the remote host key has changed.  
-**Resolution:**
-- If this is a virtual machine you just redeployed or recreated, remove the old local record and connect again:
-  ```powershell
-  ssh-keygen -R <vmPublicFqdn>
-  ssh -i "$env:USERPROFILE\.ssh\id_ed25519" azureuser@<vmPublicFqdn>
-  ```
-- On the next connection, SSH will ask you to confirm the new host fingerprint. If you have verified that this is your newly deployed VM, enter `yes`.
-- If the virtual machine was not just rebuilt by you, do not ignore the warning immediately. First verify that the domain name and public IP still belong to your own VM.
+**Browser shows `502 Bad Gateway`**
+> Wait 1-2 minutes after deployment finishes. If it persists, SSH into the VM and check:
+> ```bash
+> sudo systemctl status openclaw-gateway caddy --no-pager
+> sudo journalctl -u openclaw-gateway -n 100 --no-pager
+> ```
 
-### 4. How do I handle a missing `gateway token` prompt?
-**Cause:** OpenClaw uses token-based authentication for the dashboard. Accessing only the bare domain name is rejected.  
-**Resolution:**
-Do not guess or type the token manually. SSH into the virtual machine and run this in the remote shell:
-```bash
-openclaw-browser-url
-```
-The command prints the complete `https://.../#token=...` URL. Copy the full URL, including the token, into your browser.
-
-### 5. The browser shows `pairing required`
-**Cause:** For security reasons, a browser connecting as a new client to the gateway must be approved by an administrator.  
-**Resolution:**
-Keep the browser page open, switch back to the SSH terminal on the virtual machine, and run:
-```bash
-openclaw-approve-browser
-```
-The helper reads the local browser pairing queue directly and approves the newest Control UI request without depending on the `openclaw devices list/approve` RPC path. If it reports that there is no pending browser pairing request yet, leave the browser on the pairing screen, wait a few seconds, and rerun it.
-Known upstream note: OpenClaw `2026.3.12` through `2026.3.13` has a reported loopback WebSocket handshake regression on some hosts. In that window, `openclaw devices list` can fail with `gateway closed (1000 normal closure): no close reason` even while `openclaw gateway status` and `openclaw gateway call device.pair.list --json --params "{}"` still succeed. This Azure template does not bake in a runtime monkey patch for that upstream bug; it avoids depending on the unstable wrapper path until an upstream release ships the fix.
-After the command finishes, refresh the browser page to enter the dashboard.
-
-### 6. The browser shows `502 Bad Gateway`
-**Cause:** Deployment may not be fully finished yet, or the host-level OpenClaw Gateway or Caddy service may have failed to start or may still be restarting.  
-**Resolution:**
-1. If deployment just finished, wait 1 to 2 minutes and let all components start completely.
-2. If the issue persists, SSH into the virtual machine and inspect the service status:
-  ```bash
-  # Check the OpenClaw and Caddy service status
-  sudo systemctl status openclaw-gateway caddy --no-pager
-
-  # Inspect recent OpenClaw Gateway logs
-  sudo journalctl -u openclaw-gateway -n 100 --no-pager
-
-  # Inspect recent Caddy logs
-  sudo journalctl -u caddy -n 100 --no-pager
-  ```
-
-### 7. I cannot connect to the virtual machine (`Connection Timed Out`)
-**Cause:** The virtual machine may not have received a public IP successfully, or ports 22 and 443 may be blocked by the Network Security Group (NSG).  
-**Resolution:**
-- In Azure portal, open the **Virtual Machine** page for the deployment you just created.
-- Confirm it is in the `Running` state and that it has a Public IP assigned.
-- Open **Networking** on the left and make sure the inbound port rules allow `22` (SSH) and `443` (HTTPS).
+**Cannot connect to the VM (`Connection Timed Out`)**
+> In Azure portal, confirm the VM is Running with a public IP, and NSG allows inbound ports 22 and 443.
