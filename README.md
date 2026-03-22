@@ -42,7 +42,7 @@ cat ~/.ssh/id_ed25519.pub
 | Azure OpenAI 终结点 | 必填 | 必填 |
 | 模型部署名称 | 必填 | 必填 |
 | API 密钥 | 必填 | 无需 |
-| Azure OpenAI 资源组名称 | 跨资源组时填写 | 跨资源组时填写 |
+| Azure OpenAI 资源组名称 | 无需 | 跨资源组时填写 |
 
 Managed Identity 模式下，模板会自动尝试为 VM 分配 `Cognitive Services OpenAI User` 角色。如果部署用户权限不足，角色分配会失败，但 VM 和 OpenClaw 仍然正常部署完成（Azure 门户可能显示"部分失败"）。用户只需后续手动补上角色即可，不需要重新部署（详见第 5 步）。
 
@@ -276,7 +276,7 @@ If you want Azure OpenAI ready immediately after deployment, prepare the followi
 | Azure OpenAI Endpoint | Required | Required |
 | Deployment Name | Required | Required |
 | API Key | Required | Not needed |
-| Azure OpenAI Resource Group | When cross-resource-group | When cross-resource-group |
+| Azure OpenAI Resource Group | Not needed | When cross-resource-group |
 
 In Managed Identity mode, the template automatically attempts to assign the `Cognitive Services OpenAI User` role to the VM. If the deploying user lacks sufficient permissions, the role assignment fails but the VM and OpenClaw are fully deployed and functional (the Azure portal may show the deployment as "partially failed"). Just assign the role manually afterward — no redeployment needed (see Step 5).
 
