@@ -1,5 +1,6 @@
 caddyConfig.template.txt
 bootstrapScript.template.sh
+openclaw-gateway-mode.template.sh
 openclawConfig.template.json
 .env
 tests/__pycache__/

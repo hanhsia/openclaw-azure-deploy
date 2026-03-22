@@ -19,7 +19,6 @@ Use this skill when you are the `spec` agent and need to turn a software request
 ## Command Workflow
 
 Use the installed `openspec` CLI rather than improvising a freeform plan when the task is non-trivial.
-
 Common commands:
 
 - `openspec list`

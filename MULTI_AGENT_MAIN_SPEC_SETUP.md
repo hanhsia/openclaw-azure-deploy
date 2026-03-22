@@ -79,7 +79,7 @@ OpenClaw 里要把一个 agent 变成“会某件事”，实际上有三层：
 - `ideas`
   - skills：空数组
   - tools：`minimal` + `sessions_list` / `sessions_history` / `sessions_send`
-  - heartbeat：显式启用，默认每 `6h` 触发一次，`target: "none"`，只做内部提案，不对外发消息。
+  - heartbeat：显式启用，默认每 `15m` 触发一次，`target: "none"`，只做内部提案，不对外发消息；但如果 `spec` / `coder` / `qa` / `docs` / `deploy` / `release` 仍在处理当前交付，就返回 `HEARTBEAT_OK`。
   - 目的：只允许看上下文、发建议，不给它代码执行和文件修改能力；它应定期把基于当前项目状态的 feature 提案发给 `spec`。
 
 ## 让这些能力真正生效还需要什么
@@ -332,8 +332,8 @@ OpenClaw 上游在 `sessions_send` / `sessions_spawn` / subagent 收尾时，会
 在当前版本里，`ideas` 的“每隔一段时间触发一次”已经通过 OpenClaw 的 per-agent heartbeat 显式实现：
 
 - 模板会把 `agents.defaults.heartbeat` 设为 `{ "every": "0m" }`，避免 `main` 继续吃 upstream 默认 heartbeat。
-- 模板会给 `ideas` 单独配置 heartbeat，默认每 `6h` 触发一次，且 `target: "none"`，不会向用户外发 heartbeat 消息。
-- `/data/workspace-ideas/HEARTBEAT.md` 会作为 ideas 的 heartbeat checklist，只在出现一个值得升级给 `spec` 的具体提案时才发送；否则返回 `HEARTBEAT_OK`。
+- 模板会给 `ideas` 单独配置 heartbeat，默认每 `15m` 触发一次，且 `target: "none"`，不会向用户外发 heartbeat 消息。
+- `/data/workspace-ideas/HEARTBEAT.md` 会作为 ideas 的 heartbeat checklist；如果 `spec` / `coder` / `qa` / `docs` / `deploy` / `release` 仍在活跃交付，就返回 `HEARTBEAT_OK`；只有在交付环稳定或空闲时，才升级一个值得做的具体提案给 `spec`。
 - `ideas` 产出的内容仍然先回到 `spec`，不直接进入编码。
 
 也就是说：当前脚本已经把链路角色配好了，但“固定时间间隔自动触发”还不是 OpenClaw 内建定时器，而是下一层自动化能力。

@@ -48,12 +48,21 @@ class ConfigureMainSpecMultiagentTests(unittest.TestCase):
 
     def test_ideas_heartbeat_is_enabled_while_default_is_disabled(self):
         self.assertEqual(DISABLED_HEARTBEAT, {"every": "0m"})
-        self.assertEqual(IDEAS_HEARTBEAT["every"], "6h")
+        self.assertEqual(IDEAS_HEARTBEAT["every"], "15m")
         self.assertEqual(IDEAS_HEARTBEAT["target"], "none")
         self.assertTrue(IDEAS_HEARTBEAT["lightContext"])
         self.assertIn("Send worthwhile proposals to spec", IDEAS_HEARTBEAT["prompt"])
+        self.assertIn(
+            "if so, reply HEARTBEAT_OK",
+            IDEAS_HEARTBEAT["prompt"],
+        )
 
     def test_ideas_heartbeat_template_routes_good_proposals_to_spec(self):
+        for agent_id in ["spec", "coder", "qa", "docs", "deploy", "release"]:
+            self.assertIn(f"`{agent_id}`", IDEAS_HEARTBEAT_TEMPLATE)
+        self.assertIn(
+            "If active delivery work is still underway", IDEAS_HEARTBEAT_TEMPLATE
+        )
         self.assertIn(
             "at most one concrete, near-term improvement idea", IDEAS_HEARTBEAT_TEMPLATE
         )

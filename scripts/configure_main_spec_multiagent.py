@@ -17,10 +17,10 @@ OPENSPEC_SKILL_SOURCE = REPO_ROOT / "skills" / OPENSPEC_SKILL_NAME / "SKILL.md"
 AGENT_IDS = ["main", "spec", "coder", "qa", "docs", "release", "deploy", "ideas"]
 DISABLED_HEARTBEAT = {"every": "0m"}
 IDEAS_HEARTBEAT = {
-    "every": "6h",
+    "every": "15m",
     "target": "none",
     "lightContext": True,
-    "prompt": "Read HEARTBEAT.md if it exists (workspace context). Follow it strictly. Only surface concrete, near-term, technically feasible proposals. Send worthwhile proposals to spec with a STATUS: block. If nothing is worth escalating now, reply HEARTBEAT_OK.",
+    "prompt": "Read HEARTBEAT.md if it exists (workspace context). Follow it strictly. First check whether spec, coder, qa, docs, deploy, or release is actively working from the current session context; if so, reply HEARTBEAT_OK. Only surface one concrete, near-term, technically feasible proposal when that delivery loop appears idle or stable enough for backlog exploration. Send worthwhile proposals to spec with a STATUS: block. If nothing is worth escalating now, reply HEARTBEAT_OK.",
 }
 AGENT_SKILLS = {
     "main": None,
@@ -130,7 +130,9 @@ STATUS_BOARD_TEMPLATE = """# TASK_STATUS.md
 IDEAS_HEARTBEAT_TEMPLATE = """# HEARTBEAT.md
 
 - Review the current project state through recent session context and verified status.
-- Generate at most one concrete, near-term improvement idea that is technically feasible now.
+- First check whether `spec`, `coder`, `qa`, `docs`, `deploy`, or `release` appears to be actively working, blocked in-flight, or waiting on an immediate handoff.
+- If active delivery work is still underway or the status is ambiguous, reply `HEARTBEAT_OK`.
+- Otherwise, generate at most one concrete, near-term improvement idea that is technically feasible now.
 - If there is a worthwhile proposal, send it to `spec` with a `STATUS:` block, expected payoff, and a short implementation outline.
 - If the current work is unstable, blocked on basics, or no strong proposal stands out, reply `HEARTBEAT_OK`.
 """
@@ -354,6 +356,7 @@ You are `ideas`, the improvement specialist.
 ## Guardrails
 
 - Do not interrupt active delivery work with speculative scope creep; wait for stable checkpoints or explicit review points.
+- At heartbeat time, inspect recent session context for `spec`, `coder`, `qa`, `docs`, `deploy`, and `release`; if any are still actively executing or waiting on an immediate handoff, return `HEARTBEAT_OK`.
 - Keep ideas concrete, prioritized, and implementation-aware.
 - Prefer feasible, near-term proposals over vague long-term visions.
 - If heartbeat does not produce a strong proposal, return `HEARTBEAT_OK` instead of forcing an idea.
@@ -454,10 +457,10 @@ agent_skills = {
 }
 disabled_heartbeat = {"every": "0m"}
 ideas_heartbeat = {
-    "every": "6h",
+    "every": "15m",
     "target": "none",
     "lightContext": True,
-    "prompt": "Read HEARTBEAT.md if it exists (workspace context). Follow it strictly. Only surface concrete, near-term, technically feasible proposals. Send worthwhile proposals to spec with a STATUS: block. If nothing is worth escalating now, reply HEARTBEAT_OK.",
+    "prompt": "Read HEARTBEAT.md if it exists (workspace context). Follow it strictly. First check whether spec, coder, qa, docs, deploy, or release is actively working from the current session context; if so, reply HEARTBEAT_OK. Only surface one concrete, near-term, technically feasible proposal when that delivery loop appears idle or stable enough for backlog exploration. Send worthwhile proposals to spec with a STATUS: block. If nothing is worth escalating now, reply HEARTBEAT_OK.",
 }
 spec_allowlist = [
     "read",
