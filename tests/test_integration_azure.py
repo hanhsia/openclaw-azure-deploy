@@ -461,30 +461,106 @@ class AzureIntegrationDeploymentTests(unittest.TestCase):
             return
 
         workaround_command = (
-            'bash -lc "'
-            "set -euo pipefail; "
-            'dist="$HOME/.openclaw/lib/node_modules/openclaw/dist"; '
-            'gateway_file="$(find "$dist" -maxdepth 1 -name "gateway-cli-*.js" | head -n 1)"; '
-            'model_file="$(find "$dist" -maxdepth 1 -name "model-selection-*.js" | head -n 1)"; '
-            'test -n "$gateway_file" && test -f "$gateway_file"; '
-            'test -n "$model_file" && test -f "$model_file"; '
-            'if grep -q "const DEFAULT_HANDSHAKE_TIMEOUT_MS = 1e4;" "$gateway_file"; then '
-            "  echo gateway_patch=already; "
-            "else "
-            "  perl -0pi -e 's/const DEFAULT_HANDSHAKE_TIMEOUT_MS = 3e3;/const DEFAULT_HANDSHAKE_TIMEOUT_MS = 1e4;/g' \"$gateway_file\"; "
-            "  echo gateway_patch=applied; "
-            "fi; "
-            'if grep -q "Math.max(250, Math.min(1e4, rawConnectDelayMs)) : 1e4;" "$model_file"; then '
-            "  echo model_patch=already; "
-            "else "
-            "  perl -0pi -e 's/Math\\.max\\(250, Math\\.min\\(1e4, rawConnectDelayMs\\)\\) : 2e3;/Math.max(250, Math.min(1e4, rawConnectDelayMs)) : 1e4;/g' \"$model_file\"; "
-            "  echo model_patch=applied; "
-            "fi; "
-            "systemctl --user restart openclaw-gateway; "
-            'printf "gateway_state=%s\\n" "$(systemctl --user is-active openclaw-gateway)"; '
-            'grep -n "DEFAULT_HANDSHAKE_TIMEOUT_MS = 1e4;" "$gateway_file" | head -n 1; '
-            'grep -n "Math.max(250, Math.min(1e4, rawConnectDelayMs)) : 1e4;" "$model_file" | head -n 1'
-            '"'
+            "python3 - <<'PY'\n"
+            "from pathlib import Path\n"
+            "import subprocess\n"
+            "\n"
+            "install_root = Path.home() / '.openclaw/lib/node_modules/openclaw'\n"
+            "package_roots = []\n"
+            "if install_root.is_dir():\n"
+            "    package_roots.append(install_root)\n"
+            "unit_file = Path.home() / '.config/systemd/user/openclaw-gateway.service'\n"
+            "if unit_file.is_file():\n"
+            "    for line in unit_file.read_text(encoding='utf-8').splitlines():\n"
+            "        if not line.startswith('ExecStart='):\n"
+            "            continue\n"
+            "        parts = line.split()\n"
+            "        if len(parts) >= 2:\n"
+            "            entrypoint = Path(parts[1])\n"
+            "            package_root = entrypoint.parent.parent\n"
+            "            if package_root.is_dir():\n"
+            "                package_roots.append(package_root)\n"
+            "        break\n"
+            "seen = set()\n"
+            "resolved_roots = []\n"
+            "for package_root in package_roots:\n"
+            "    resolved = package_root.resolve()\n"
+            "    key = str(resolved)\n"
+            "    if key not in seen:\n"
+            "        seen.add(key)\n"
+            "        resolved_roots.append(resolved)\n"
+            "if not resolved_roots:\n"
+            "    raise SystemExit('No OpenClaw package roots were discovered for workaround patching')\n"
+            "needle_before = 'Math.max(250, Math.min(1e4, rawConnectDelayMs)) : 2e3;'\n"
+            "needle_after = 'Math.max(250, Math.min(1e4, rawConnectDelayMs)) : 1e4;'\n"
+            "patched_gateway = False\n"
+            "patched_model = False\n"
+            "for package_root in resolved_roots:\n"
+            "    dist = package_root / 'dist'\n"
+            "    gateway_file = next(dist.glob('gateway-cli-*.js'), None)\n"
+            "    model_file = next(dist.glob('model-selection-*.js'), None)\n"
+            "    if gateway_file is None or not gateway_file.is_file():\n"
+            "        raise SystemExit(f'gateway-cli bundle was not found under {dist}')\n"
+            "    if model_file is None or not model_file.is_file():\n"
+            "        raise SystemExit(f'model-selection bundle was not found under {dist}')\n"
+            "    print(f'patch_root={package_root}')\n"
+            "    gateway_text = gateway_file.read_text(encoding='utf-8')\n"
+            "    model_text = model_file.read_text(encoding='utf-8')\n"
+            "    if 'const DEFAULT_HANDSHAKE_TIMEOUT_MS = 1e4;' in gateway_text:\n"
+            "        print('gateway_patch=already')\n"
+            "    else:\n"
+            "        gateway_text = gateway_text.replace('const DEFAULT_HANDSHAKE_TIMEOUT_MS = 3e3;', 'const DEFAULT_HANDSHAKE_TIMEOUT_MS = 1e4;')\n"
+            "        gateway_file.write_text(gateway_text, encoding='utf-8')\n"
+            "        print('gateway_patch=applied')\n"
+            "    if 'const DEFAULT_HANDSHAKE_TIMEOUT_MS = 1e4;' in gateway_file.read_text(encoding='utf-8'):\n"
+            "        patched_gateway = True\n"
+            "    if needle_after in model_text:\n"
+            "        print('model_patch=already')\n"
+            "    else:\n"
+            "        model_text = model_text.replace(needle_before, needle_after)\n"
+            "        model_file.write_text(model_text, encoding='utf-8')\n"
+            "        print('model_patch=applied')\n"
+            "    if needle_after in model_file.read_text(encoding='utf-8'):\n"
+            "        patched_model = True\n"
+            "if not patched_gateway:\n"
+            "    raise SystemExit('gateway timeout patch was not present after patching')\n"
+            "if not patched_model:\n"
+            "    raise SystemExit('model timeout patch was not present after patching')\n"
+            "\n"
+            "subprocess.run(['systemctl', '--user', 'restart', 'openclaw-gateway'], check=True)\n"
+            "state = subprocess.run(\n"
+            "    ['systemctl', '--user', 'is-active', 'openclaw-gateway'],\n"
+            "    check=True,\n"
+            "    capture_output=True,\n"
+            "    text=True,\n"
+            ").stdout.strip()\n"
+            "print(f'gateway_state={state}')\n"
+            "for _ in range(12):\n"
+            "    probe = subprocess.run(\n"
+            "        ['/usr/local/bin/openclaw', 'devices', 'list', '--json'],\n"
+            "        capture_output=True,\n"
+            "        text=True,\n"
+            "    )\n"
+            "    if probe.returncode == 0:\n"
+            "        print('wrapper_probe=ok')\n"
+            "        break\n"
+            "    import time\n"
+            "    time.sleep(2)\n"
+            "else:\n"
+            "    print('wrapper_probe=failed')\n"
+            "for package_root in resolved_roots:\n"
+            "    dist = package_root / 'dist'\n"
+            "    for path in dist.glob('gateway-cli-*.js'):\n"
+            "        for line in path.read_text(encoding='utf-8').splitlines():\n"
+            "            if 'DEFAULT_HANDSHAKE_TIMEOUT_MS = 1e4;' in line:\n"
+            "                print(line)\n"
+            "                break\n"
+            "    for path in dist.glob('model-selection-*.js'):\n"
+            "        for line in path.read_text(encoding='utf-8').splitlines():\n"
+            "            if needle_after in line:\n"
+            "                print(line)\n"
+            "                break\n"
+            "PY"
         )
 
         stdout, _ = self._run_ssh(
@@ -493,6 +569,7 @@ class AzureIntegrationDeploymentTests(unittest.TestCase):
             workaround_command,
         )
         self.assertIn("gateway_state=active", stdout)
+        self.assertIn("wrapper_probe=ok", stdout)
         self.assertIn("DEFAULT_HANDSHAKE_TIMEOUT_MS = 1e4;", stdout)
         self.assertIn(
             "Math.max(250, Math.min(1e4, rawConnectDelayMs)) : 1e4;",
@@ -541,15 +618,33 @@ class AzureIntegrationDeploymentTests(unittest.TestCase):
         return payload
 
     def _list_pairing_payload(self, cloud_name, vm_public_fqdn):
-        devices_stdout, devices_stderr = self._run_ssh(
-            cloud_name,
-            vm_public_fqdn,
-            "bash -lc '/usr/local/bin/openclaw gateway call device.pair.list --json --params \"{}\"'",
-        )
-        return self._extract_json_payload(
-            f"{devices_stdout}\n{devices_stderr}",
-            "openclaw gateway call device.pair.list --json output",
-        )
+        attempts = [
+            (
+                "bash -lc '/usr/local/bin/openclaw devices list --json'",
+                "openclaw devices list --json output",
+            ),
+            (
+                "bash -lc '/usr/local/bin/openclaw gateway call device.pair.list --json --params \"{}\"'",
+                "openclaw gateway call device.pair.list --json output",
+            ),
+        ]
+        failures = []
+        for command, description in attempts:
+            try:
+                devices_stdout, devices_stderr = self._run_ssh(
+                    cloud_name,
+                    vm_public_fqdn,
+                    command,
+                )
+                return self._extract_json_payload(
+                    f"{devices_stdout}\n{devices_stderr}",
+                    description,
+                )
+            except subprocess.CalledProcessError as exc:
+                failures.append(
+                    f"{description}: stdout={exc.stdout}\nstderr={exc.stderr}"
+                )
+        self.fail("All pairing payload commands failed:\n" + "\n---\n".join(failures))
 
     def _matching_browser_devices(self, payload, state):
         return [
