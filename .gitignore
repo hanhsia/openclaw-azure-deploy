@@ -18,3 +18,4 @@ generated/
 .env.local
 .tmp-*.json
 .tmp-test-gpt54-image.mjs
+openclaw-gateway-mode.template.sh

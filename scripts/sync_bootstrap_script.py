@@ -21,15 +21,17 @@ HELPER_TEMPLATE_PATHS = {
     "openclaw-approve-browser": REPO_ROOT / "openclaw-approve-browser.template.sh",
     "openclaw-approve-teams-pairing": REPO_ROOT
     / "openclaw-approve-teams-pairing.template.sh",
+    "openclaw-gateway-mode": REPO_ROOT / "openclaw-gateway-mode.template.sh",
 }
 
 HELPER_TEMPLATE_MARKERS = {
     "openclaw-browser-url": "__OPENCLAW_BROWSER_URL_TEMPLATE__",
     "openclaw-approve-browser": "__OPENCLAW_APPROVE_BROWSER_TEMPLATE__",
     "openclaw-approve-teams-pairing": "__OPENCLAW_APPROVE_TEAMS_PAIRING_TEMPLATE__",
+    "openclaw-gateway-mode": "__OPENCLAW_GATEWAY_MODE_TEMPLATE__",
 }
 
-ARM_PLACEHOLDER_RE = re.compile(r"\{(\d+)\}")
+ARM_PLACEHOLDER_RE = re.compile(r"\{(1[0-3]|[0-9])\}")
 
 
 def _arm_format_arguments() -> str:

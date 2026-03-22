@@ -117,7 +117,23 @@ Dashboard URL: https://your-hostname/#token=...
 openclaw-approve-browser
 ```
 该 helper 会直接读取本机的浏览器配对队列并批准最新的 Control UI 请求。如果脚本提示当前没有待处理的浏览器配对请求，请保持浏览器停留在配对页面，等待几秒后重试。
+补充说明：OpenClaw 上游 `2026.3.12` 到 `2026.3.13` 期间存在已知的 loopback WebSocket 握手回归，某些机器上 `openclaw devices list` 可能会报 `gateway closed (1000 normal closure): no close reason`，即使 `openclaw gateway status` 和 `openclaw gateway call device.pair.list --json --params "{}"` 仍然正常。这个 Azure 模板目前不内置 monkey patch，而是避开这条已知不稳定的 wrapper 路径，等待上游正式修复版本。
 命令执行完毕后，回到浏览器刷新页面即可完成登录。
+
+#### 在本机 loopback 和公网 gateway 之间切换 SSH CLI
+默认情况下，这个模板会让 SSH 管理员 shell 继续走 OpenClaw 官方推荐的本机 loopback 管理路径。如果你需要临时切到公网 `wss://` gateway 进行排查，可以执行：
+```bash
+openclaw-use-public-gateway
+```
+该 helper 会先探测 SSH CLI 走公网 `wss://` 的连接是否已配对；如果还没有，它会按这台 VM 当前 SSH CLI 的本机 device identity 去匹配并自动批准对应的 pending request，然后再用 `openclaw health --verbose` 验证公网路径已经真的可用，最后才持久化切换。
+如果要切回默认 loopback：
+```bash
+openclaw-use-loopback-gateway
+```
+切换结果会保存到后续登录 shell，所以执行完以后请重新登录 SSH，再运行以下命令确认当前模式：
+```bash
+openclaw-gateway-mode current
+```
 
 ---
 
@@ -153,6 +169,7 @@ openclaw-browser-url
 openclaw-approve-browser
 ```
 该 helper 会直接读取本机的浏览器配对队列并批准最新的 Control UI 请求，不依赖 `openclaw devices list/approve` 这条 RPC 路径。如果脚本提示当前没有待处理的浏览器配对请求，请保持浏览器停留在配对页面，等待几秒后重试。
+补充说明：OpenClaw 上游 `2026.3.12` 到 `2026.3.13` 期间存在已知的 loopback WebSocket 握手回归，某些机器上 `openclaw devices list` 可能会报 `gateway closed (1000 normal closure): no close reason`，即使 `openclaw gateway status` 和 `openclaw gateway call device.pair.list --json --params "{}"` 仍然正常。这个 Azure 模板目前不内置 monkey patch，而是避开这条已知不稳定的 wrapper 路径，等待上游正式修复版本。
 如果你需要在这台 VM 上直接做管理员配置，优先使用本机 CLI：
 
 ```bash
@@ -161,6 +178,21 @@ openclaw config get gateway.auth.mode
 ```
 
 第一条会确认当前 SSH CLI 正在通过本机 loopback 访问 gateway；第二条会确认它读到的就是 daemon 正在使用的同一份配置。后续在 SSH 里执行 `openclaw config set ...`、`openclaw config validate`、`openclaw gateway restart` 时，变更会直接作用于这台 Azure VM 上的同一个 gateway，因此浏览器和其它 client 也会使用更新后的配置。然后返回浏览器刷新页面，即可正常使用 OpenClaw。
+
+如果你需要临时把 SSH CLI 切到公网 `wss://` gateway，可以运行：
+
+```bash
+openclaw-use-public-gateway
+```
+该 helper 会先探测 SSH CLI 走公网 `wss://` 的连接是否已配对；如果还没有，它会按这台 VM 当前 SSH CLI 的本机 device identity 去定位并自动批准对应的 pending request，然后再用 `openclaw health --verbose` 验证公网路径已经真的可用，最后才把后续登录 shell 的默认 gateway 切到公网 `wss://`。
+
+如需恢复默认 loopback：
+
+```bash
+openclaw-use-loopback-gateway
+```
+
+执行后重新登录 SSH，再运行 `openclaw-gateway-mode current` 确认当前模式即可。
 
 
 ## 4. 后续升级
@@ -341,6 +373,8 @@ openclaw-browser-url
 ```bash
 openclaw-approve-browser
 ```
+该 helper 会直接读取本机的浏览器配对队列并批准最新的 Control UI 请求，不依赖 `openclaw devices list/approve` 这条 RPC 路径。如果脚本提示当前没有待处理的浏览器配对请求，请保持浏览器停留在配对页面，等待几秒后重试。
+补充说明：OpenClaw 上游 `2026.3.12` 到 `2026.3.13` 期间存在已知的 loopback WebSocket 握手回归，某些机器上 `openclaw devices list` 可能会报 `gateway closed (1000 normal closure): no close reason`，即使 `openclaw gateway status` 和 `openclaw gateway call device.pair.list --json --params "{}"` 仍然正常。这个 Azure 模板目前不内置 monkey patch，而是避开这条已知不稳定的 wrapper 路径，等待上游正式修复版本。
 命令执行完毕后，回到浏览器刷新页面即可直接进入面板。
 
 ### 6. 浏览器访问报错 `502 Bad Gateway`
@@ -470,9 +504,25 @@ If the browser page shows `pairing required`, keep the page open, return to your
 ```bash
 openclaw-approve-browser
 ```
+This helper reads the local browser pairing queue directly and approves the newest Control UI request. If it says there is no pending browser pairing request, keep the dashboard on the pairing page, wait a few seconds, and run it again.
+Known upstream note: OpenClaw `2026.3.12` through `2026.3.13` has a reported loopback WebSocket handshake regression on some hosts. In that window, `openclaw devices list` can fail with `gateway closed (1000 normal closure): no close reason` even while `openclaw gateway status` and `openclaw gateway call device.pair.list --json --params "{}"` still succeed. This Azure template does not bake in a runtime monkey patch for that upstream bug; it avoids depending on the unstable wrapper path until an upstream release ships the fix.
 After the command finishes, refresh the browser page to complete sign-in.
 
 This template keeps the shared gateway token in `/etc/openclaw/openclaw.env` and auto-exports it for the deployment's administrator SSH login shell, but it does not force `OPENCLAW_GATEWAY_URL` to the public `wss://` endpoint for host-local administration. That matches OpenClaw's documented model: manage the gateway locally from the gateway host, and let browsers or other remote devices connect through the public entrypoint with their own pairing records. Because every client still talks to the same gateway on the same Azure VM, they continue to share the same session/workspace state.
+
+If you need to temporarily point the SSH CLI at the public `wss://` gateway, run:
+```bash
+openclaw-use-public-gateway
+```
+This helper first checks whether the SSH CLI is already paired against the public `wss://` gateway. If not, it matches the pending request for this VM's current local device identity, automatically approves it, validates the public path with `openclaw health --verbose`, and only then persists the switch.
+To return to the default loopback path, run:
+```bash
+openclaw-use-loopback-gateway
+```
+The selected mode is persisted for future login shells, so reconnect SSH after switching and confirm it with:
+```bash
+openclaw-gateway-mode current
+```
 
 ---
 
@@ -507,7 +557,20 @@ If the browser page asks for pairing approval, run:
 ```bash
 openclaw-approve-browser
 ```
+This helper reads the local browser pairing queue directly and approves the newest Control UI request. If it says there is no pending browser pairing request, keep the dashboard on the pairing page, wait a few seconds, and run it again.
+Known upstream note: OpenClaw `2026.3.12` through `2026.3.13` has a reported loopback WebSocket handshake regression on some hosts. In that window, `openclaw devices list` can fail with `gateway closed (1000 normal closure): no close reason` even while `openclaw gateway status` and `openclaw gateway call device.pair.list --json --params "{}"` still succeed. This Azure template does not bake in a runtime monkey patch for that upstream bug; it avoids depending on the unstable wrapper path until an upstream release ships the fix.
 Then return to the browser and refresh the page to start using OpenClaw.
+
+If you need to troubleshoot through the public `wss://` endpoint from SSH, switch the login-shell default with:
+```bash
+openclaw-use-public-gateway
+```
+This helper first checks whether the SSH CLI is already paired against the public `wss://` gateway. If not, it matches the pending request for this VM's current local device identity, automatically approves it, validates the public path with `openclaw health --verbose`, and only then makes the public `wss://` path the login-shell default.
+To switch back to the default loopback path:
+```bash
+openclaw-use-loopback-gateway
+```
+Reconnect SSH after the change, then run `openclaw-gateway-mode current` to verify the active mode.
 
 ## 4. Updating Later
 
@@ -691,21 +754,6 @@ openclaw-approve-browser
 ```
 The helper reads the local browser pairing queue directly and approves the newest Control UI request without depending on the `openclaw devices list/approve` RPC path. If it reports that there is no pending browser pairing request yet, leave the browser on the pairing screen, wait a few seconds, and rerun it.
 Known upstream note: OpenClaw `2026.3.12` through `2026.3.13` has a reported loopback WebSocket handshake regression on some hosts. In that window, `openclaw devices list` can fail with `gateway closed (1000 normal closure): no close reason` even while `openclaw gateway status` and `openclaw gateway call device.pair.list --json --params "{}"` still succeed. This Azure template does not bake in a runtime monkey patch for that upstream bug; it avoids depending on the unstable wrapper path until an upstream release ships the fix.
-If you need to temporarily restore that wrapper path on an already deployed VM, you can manually widen the installed OpenClaw dist handshake timeouts and restart the gateway. This only affects the current machine; you may need to reapply it after reinstalling OpenClaw or running `openclaw update`:
-```bash
-DIST="$HOME/.openclaw/lib/node_modules/openclaw/dist"
-
-cp "$DIST"/gateway-cli-*.js "$DIST"/model-selection-*.js /tmp/
-
-perl -0pi -e 's/const DEFAULT_HANDSHAKE_TIMEOUT_MS = 3e3;/const DEFAULT_HANDSHAKE_TIMEOUT_MS = 1e4;/g' \
-  "$DIST"/gateway-cli-*.js
-
-perl -0pi -e 's/Math\.max\(250, Math\.min\(1e4, rawConnectDelayMs\)\) : 2e3;/Math.max(250, Math.min(1e4, rawConnectDelayMs)) : 1e4;/g' \
-  "$DIST"/model-selection-*.js
-
-systemctl --user restart openclaw-gateway
-```
-This workaround is an emergency literal replacement against the current upstream dist bundles. It is useful for recovery, but the long-term fix is to upgrade to an upstream release that includes the proper handshake fix.
 After the command finishes, refresh the browser page to enter the dashboard.
 
 ### 6. The browser shows `502 Bad Gateway`

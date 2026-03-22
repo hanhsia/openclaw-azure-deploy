@@ -186,14 +186,22 @@ class AzureDeployTemplateTests(unittest.TestCase):
         )
         self.assertNotIn("OPENCLAW_HOME=/home/{5}", self.bootstrap_script)
         self.assertIn(
-            'OPENCLAW_ORIGINAL_PATH="$PATH"\n  set -a\n  . /etc/openclaw/openclaw.env\n  set +a\n  PATH="/home/{5}/.openclaw/tools/node/bin:/home/{5}/.openclaw/bin:$OPENCLAW_ORIGINAL_PATH"\n  export PATH\n  unset OPENCLAW_ORIGINAL_PATH',
+            'OPENCLAW_ORIGINAL_PATH="$PATH"\n  unset OPENCLAW_GATEWAY_URL\n  set -a\n  . /etc/openclaw/openclaw.env\n  if [ -r /etc/openclaw/openclaw-shell-override.env ]; then\n    . /etc/openclaw/openclaw-shell-override.env\n  fi\n  set +a\n  PATH="/home/{5}/.openclaw/tools/node/bin:/home/{5}/.openclaw/bin:$OPENCLAW_ORIGINAL_PATH"\n  export PATH\n  unset OPENCLAW_ORIGINAL_PATH',
             self.bootstrap_script,
         )
         self.assertNotIn(
             "cat > /etc/openclaw/openclaw-shell.env <<EOF", self.bootstrap_script
         )
         self.assertNotIn(".openclaw-env.sh", self.bootstrap_script)
-        self.assertNotIn("OPENCLAW_GATEWAY_URL", self.bootstrap_script)
+        self.assertIn(
+            ": > /etc/openclaw/openclaw-shell-override.env",
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            "chmod 660 /etc/openclaw/openclaw-shell-override.env",
+            self.bootstrap_script,
+        )
+        self.assertNotIn("OPENCLAW_GATEWAY_URL={4}", self.bootstrap_script)
 
     def test_bootstrap_script_trusts_loopback_reverse_proxy(self):
         self.assertIn(
@@ -213,6 +221,21 @@ class AzureDeployTemplateTests(unittest.TestCase):
         self.assertIn("OPENCLAW_MSTEAMS_APP_PASSWORD='{9}'", self.bootstrap_script)
         self.assertIn("OPENCLAW_MSTEAMS_TENANT_ID='{10}'", self.bootstrap_script)
         self.assertIn("openclaw-approve-teams-pairing", self.bootstrap_script)
+        self.assertIn("openclaw-gateway-mode", self.bootstrap_script)
+        self.assertIn("openclaw-use-public-gateway", self.bootstrap_script)
+        self.assertIn("openclaw-use-loopback-gateway", self.bootstrap_script)
+        self.assertIn("device-pairing-*.js", self.bootstrap_script)
+        self.assertIn("/data/identity/device.json", self.bootstrap_script)
+        self.assertIn("listDevicePairing", self.bootstrap_script)
+        self.assertIn("approveDevicePairing", self.bootstrap_script)
+        self.assertIn(
+            'const deviceId = String(item?.deviceId || "").trim();',
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            'OPENCLAW_GATEWAY_URL="$public_gateway_url" /usr/local/bin/openclaw health --verbose --timeout "$timeout_ms"',
+            self.bootstrap_script,
+        )
         self.assertIn(
             'git config --global --add url."https://github.com/".insteadOf ssh://git@github.com/',
             self.bootstrap_script,
@@ -433,7 +456,15 @@ class AzureDeployTemplateTests(unittest.TestCase):
             self.bootstrap_script,
         )
         self.assertIn(
-            'run_admin_bus_bash \'. /etc/openclaw/openclaw.env && cd "$HOME" && exec /usr/local/bin/openclaw config set "$1" "$2" --strict-json\'',
+            'run_admin_bus_bash \'./etc/openclaw/openclaw.env && cd "$HOME" && exec /usr/local/bin/openclaw config set --strict-json -- "$1" "$2"\''.replace(
+                "'./", "'. /"
+            ),
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            'run_admin_bus_bash \'./etc/openclaw/openclaw.env && cd "$HOME" && exec /usr/local/bin/openclaw config set -- "$1" "$2"\''.replace(
+                "'./", "'. /"
+            ),
             self.bootstrap_script,
         )
         self.assertIn(
@@ -509,7 +540,10 @@ class AzureDeployTemplateTests(unittest.TestCase):
             self.bootstrap_script,
         )
         self.assertIn('pairing approve msteams "$1" --notify', self.bootstrap_script)
-        self.assertNotIn("python3 -c '", self.bootstrap_script)
+        self.assertNotIn(
+            "python3 is required for automatic public CLI pairing",
+            self.bootstrap_script,
+        )
         self.assertIn(
             "text = sys.stdin.read(); start = text.find(chr(123))",
             arm_bootstrap_script,
@@ -567,6 +601,30 @@ class AzureDeployTemplateTests(unittest.TestCase):
     def test_readme_documents_manual_browser_pairing_fallback(self):
         self.assertIn("openclaw-approve-browser", self.readme)
         self.assertIn("reads the local browser pairing queue directly", self.readme)
+        self.assertIn(
+            "OpenClaw 上游 `2026.3.12` 到 `2026.3.13` 期间存在已知的 loopback WebSocket 握手回归",
+            self.readme,
+        )
+        self.assertIn(
+            "Known upstream note: OpenClaw `2026.3.12` through `2026.3.13` has a reported loopback WebSocket handshake regression",
+            self.readme,
+        )
+        self.assertNotIn(
+            "If you need to temporarily restore that wrapper path on an already deployed VM",
+            self.readme,
+        )
+        self.assertNotIn(
+            "This workaround is an emergency literal replacement against the current upstream dist bundles.",
+            self.readme,
+        )
+
+    def test_readme_documents_gateway_mode_switching(self):
+        self.assertIn("openclaw-use-public-gateway", self.readme)
+        self.assertIn("openclaw-use-loopback-gateway", self.readme)
+        self.assertIn("openclaw-gateway-mode current", self.readme)
+        self.assertIn("reconnect SSH", self.readme)
+        self.assertIn("current local device identity", self.readme)
+        self.assertIn("openclaw health --verbose", self.readme)
 
     def test_readme_documents_homebrew_and_passwordless_sudo(self):
         self.assertIn("Homebrew", self.readme)
@@ -588,6 +646,7 @@ class AzureDeployTemplateTests(unittest.TestCase):
 
         for match in re.finditer(r"(?<!\{)\{([^{}]+)\}(?!\})", format_string):
             self.assertRegex(match.group(1), r"^\d+$")
+            self.assertLessEqual(int(match.group(1)), 13)
 
     def test_generated_bootstrap_artifacts_are_in_sync(self):
         self.assertTrue(DEFAULT_ARM_STRING_PATH.exists())
@@ -610,14 +669,10 @@ class AzureDeployTemplateTests(unittest.TestCase):
         )
 
     def test_extracted_helper_templates_are_in_sync(self):
-        arm_bootstrap_script = extract_arm_format_string(
-            self.template["variables"]["bootstrapScript"]
-        )
-
         for script_name, path in HELPER_TEMPLATE_PATHS.items():
             self.assertEqual(
                 path.read_text(encoding="utf-8"),
-                extract_embedded_script(arm_bootstrap_script, script_name),
+                extract_embedded_script(self.bootstrap_script, script_name),
             )
 
     def test_readme_documents_user_prefix_update_path(self):
