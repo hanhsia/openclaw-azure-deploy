@@ -245,12 +245,16 @@ class AzureDeployTemplateTests(unittest.TestCase):
         self.assertIn("openclaw-gateway-mode", self.bootstrap_script)
         self.assertIn("openclaw-use-public-gateway", self.bootstrap_script)
         self.assertIn("openclaw-use-loopback-gateway", self.bootstrap_script)
-        self.assertIn("device-pairing-*.js", self.bootstrap_script)
-        self.assertIn("/data/identity/device.json", self.bootstrap_script)
-        self.assertIn("listDevicePairing", self.bootstrap_script)
-        self.assertIn("approveDevicePairing", self.bootstrap_script)
         self.assertIn(
-            'const deviceId = String(item?.deviceId || "").trim();',
+            'openclaw gateway call device.pair.list --json --params "{}"',
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            "openclaw gateway call device.pair.approve --json --params",
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            "payload.get('pending') or []",
             self.bootstrap_script,
         )
         self.assertIn(
@@ -453,27 +457,22 @@ class AzureDeployTemplateTests(unittest.TestCase):
             "systemctl --user is-active openclaw-gateway",
             self.bootstrap_script,
         )
+        self.assertIn("command -v openclaw >/dev/null 2>&1", self.bootstrap_script)
+        self.assertIn("list_browser_request_id()", self.bootstrap_script)
+        self.assertIn("approve_browser_request()", self.bootstrap_script)
+        self.assertIn("text.find(chr(123))", self.bootstrap_script)
+        self.assertIn("payload.get('device') or {}", self.bootstrap_script)
+        self.assertNotIn('PAIRING_LIST_JS_B64="', self.bootstrap_script)
+        self.assertNotIn('PAIRING_APPROVE_JS_B64="', self.bootstrap_script)
         self.assertIn(
-            'OPENCLAW_NODE_BIN="/home/{5}/.openclaw/tools/node/bin/node"',
-            self.bootstrap_script,
-        )
-        self.assertIn('PAIRING_LIST_JS_B64="', self.bootstrap_script)
-        self.assertIn('PAIRING_APPROVE_JS_B64="', self.bootstrap_script)
-        self.assertIn(
-            "OpenClaw device pairing module was not found under $OPENCLAW_DIST_DIR",
+            "OpenClaw CLI was not found in PATH",
             self.bootstrap_script,
         )
         self.assertIn(
             "No pending browser pairing requests. Keep the dashboard page open on the pairing screen, wait a few seconds, and try again.",
             self.bootstrap_script,
         )
-        self.assertIn(
-            "printf '%s' \"$PAIRING_LIST_JS_B64\" | base64 -d", self.bootstrap_script
-        )
         self.assertIn("2>&1", self.bootstrap_script)
-        self.assertIn(
-            "printf '%s' \"$PAIRING_APPROVE_JS_B64\" | base64 -d", self.bootstrap_script
-        )
         self.assertIn('OPENCLAW_UID="$(id -u {5})"', arm_bootstrap_script)
         self.assertIn(
             'systemctl start "user@$OPENCLAW_UID.service"', arm_bootstrap_script
@@ -484,7 +483,6 @@ class AzureDeployTemplateTests(unittest.TestCase):
         self.assertIn(
             "systemctl --user is-active openclaw-gateway", arm_bootstrap_script
         )
-        self.assertIn("OPENCLAW_REQUEST_ID:", self.bootstrap_script)
         self.assertIn(
             "Approving browser pairing request: $request_id", self.bootstrap_script
         )
@@ -509,26 +507,28 @@ class AzureDeployTemplateTests(unittest.TestCase):
             "text = sys.stdin.read(); start = text.find(chr(123))",
             arm_bootstrap_script,
         )
+        self.assertIn("command -v openclaw >/dev/null 2>&1", arm_bootstrap_script)
         self.assertIn(
-            'OPENCLAW_NODE_BIN="/home/{5}/.openclaw/tools/node/bin/node"',
+            "openclaw gateway call device.pair.list --json --params",
             arm_bootstrap_script,
         )
-        self.assertIn('PAIRING_LIST_JS_B64="', arm_bootstrap_script)
-        self.assertIn('PAIRING_APPROVE_JS_B64="', arm_bootstrap_script)
+        self.assertIn(
+            "openclaw gateway call device.pair.approve --json --params",
+            arm_bootstrap_script,
+        )
+        self.assertIn("list_browser_request_id()", arm_bootstrap_script)
+        self.assertIn("approve_browser_request()", arm_bootstrap_script)
+        self.assertIn("text.find(chr(123))", arm_bootstrap_script)
+        self.assertIn("payload.get(''device'') or {{}}", arm_bootstrap_script)
+        self.assertNotIn('PAIRING_LIST_JS_B64="', arm_bootstrap_script)
+        self.assertNotIn('PAIRING_APPROVE_JS_B64="', arm_bootstrap_script)
         self.assertIn("set -eux\n", arm_bootstrap_script)
         self.assertNotIn("set -euxo pipefail", arm_bootstrap_script)
         self.assertIn(
             "No pending browser pairing requests. Keep the dashboard page open on the pairing screen, wait a few seconds, and try again.",
             arm_bootstrap_script,
         )
-        self.assertIn('PAIRING_LIST_JS_B64="', arm_bootstrap_script)
-        self.assertIn(
-            'base64 -d | "$OPENCLAW_NODE_BIN" --input-type=module - "$OPENCLAW_PAIRING_MODULE"',
-            arm_bootstrap_script,
-        )
         self.assertIn("2>&1", arm_bootstrap_script)
-        self.assertIn('PAIRING_APPROVE_JS_B64="', arm_bootstrap_script)
-        self.assertIn("OPENCLAW_REQUEST_ID:", arm_bootstrap_script)
         self.assertIn(
             "Approving browser pairing request: $request_id", arm_bootstrap_script
         )
@@ -537,7 +537,6 @@ class AzureDeployTemplateTests(unittest.TestCase):
             'gateway_url="ws://127.0.0.1:$OPENCLAW_GATEWAY_PORT"', arm_bootstrap_script
         )
         self.assertNotIn("sudo -u {5} env HOME=/home/{5}", arm_bootstrap_script)
-        self.assertIn("device-pairing-*.js", arm_bootstrap_script)
         self.assertNotIn(
             "openclaw plugins install @openclaw/msteams", self.bootstrap_script
         )
@@ -561,7 +560,7 @@ class AzureDeployTemplateTests(unittest.TestCase):
 
     def test_readme_documents_manual_browser_pairing_fallback(self):
         self.assertIn("openclaw-approve-browser", self.readme)
-        self.assertIn("reads the local browser pairing queue directly", self.readme)
+        self.assertIn("uses the official OpenClaw CLI gateway call", self.readme)
         self.assertIn(
             "OpenClaw 上游 `2026.3.12` 到 `2026.3.13` 期间存在已知的 loopback WebSocket 握手回归",
             self.readme,
@@ -570,6 +569,7 @@ class AzureDeployTemplateTests(unittest.TestCase):
             "Known upstream note: OpenClaw `2026.3.12` through `2026.3.13` has a reported loopback WebSocket handshake regression",
             self.readme,
         )
+        self.assertNotIn("reads the local browser pairing queue directly", self.readme)
         self.assertNotIn(
             "If you need to temporarily restore that wrapper path on an already deployed VM",
             self.readme,
@@ -597,7 +597,7 @@ class AzureDeployTemplateTests(unittest.TestCase):
         format_string = extract_arm_format_string(arm_bootstrap_script)
 
         self.assertIn(
-            "PAIRING_LIST_JS_B64=",
+            'openclaw gateway call device.pair.list --json --params "{{}}"',
             format_string,
         )
         self.assertIn("OPENCLAW_ALLOWED_ORIGINS_JSON='{13}'", format_string)

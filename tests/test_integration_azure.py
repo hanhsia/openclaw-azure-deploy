@@ -272,15 +272,18 @@ class AzureIntegrationDeploymentTests(unittest.TestCase):
         self.assertNotIn(
             'gateway_url="ws://127.0.0.1:${OPENCLAW_GATEWAY_PORT}"', script_stdout
         )
-        self.assertIn("device-pairing-*.js", script_stdout)
-        self.assertIn("PAIRING_LIST_JS_B64=", script_stdout)
-        self.assertIn("PAIRING_APPROVE_JS_B64=", script_stdout)
-        self.assertIn("OPENCLAW_REQUEST_ID:", script_stdout)
-        self.assertIn("printf '%s' \"$PAIRING_LIST_JS_B64\" | base64 -d", script_stdout)
         self.assertIn(
-            "printf '%s' \"$PAIRING_APPROVE_JS_B64\" | base64 -d", script_stdout
+            'openclaw gateway call device.pair.list --json --params "{}"',
+            script_stdout,
         )
+        self.assertIn(
+            "openclaw gateway call device.pair.approve --json --params",
+            script_stdout,
+        )
+        self.assertIn("list_browser_request_id()", script_stdout)
+        self.assertIn("approve_browser_request()", script_stdout)
         self.assertNotIn("openclaw devices approve --latest", script_stdout)
+        self.assertNotIn("device-pairing-*.js", script_stdout)
 
     def _validate_runtime_install_state(
         self, cloud_name, vm_public_fqdn, expect_msteams_runtime=False
@@ -312,7 +315,6 @@ class AzureIntegrationDeploymentTests(unittest.TestCase):
                 "PY"
                 '\nimport json\nfrom pathlib import Path\nconfig = json.loads(Path.home().joinpath(".openclaw", "openclaw.json").read_text(encoding="utf-8"))\nprint((((config.get("plugins") or dict()).get("slots") or dict()).get("contextEngine")) or "")\nPY\n)" '
                 '&& printf "plugin_context_engine=%s\\n" "$plugin_context_engine" '
-                '&& if test -d "$HOME/.openclaw/extensions/lossless-claw"; then echo runtime_lossless_claw_dir=present; else echo runtime_lossless_claw_dir=missing; fi '
                 '&& if test -f "$install_package_dir/extensions/msteams/package.json"; then echo runtime_msteams_package_json=present; else echo runtime_msteams_package_json=missing; fi '
                 '&& if test -d "$install_package_dir/extensions/msteams/node_modules/@microsoft/agents-hosting"; then echo runtime_msteams_agents_hosting=present; else echo runtime_msteams_agents_hosting=missing; fi '
                 '&& if test -d "$gateway_package_dir/extensions/msteams/node_modules/@microsoft/agents-hosting"; then echo gateway_msteams_agents_hosting=present; else echo gateway_msteams_agents_hosting=missing; fi '
@@ -358,8 +360,6 @@ class AzureIntegrationDeploymentTests(unittest.TestCase):
         )
         self.assertTrue(values.get("gateway_entrypoint", "").endswith("/dist/entry.js"))
         self.assertTrue(values.get("gateway_package_dir", "").endswith("/openclaw"))
-        self.assertEqual(values.get("plugin_context_engine"), "lossless-claw")
-        self.assertEqual(values.get("runtime_lossless_claw_dir"), "present")
         self.assertEqual(values.get("gateway_state"), "active")
         if self.env.get("TEST_FEISHU_APP_ID") and self.env.get(
             "TEST_FEISHU_APP_SECRET"
@@ -709,6 +709,18 @@ class AzureIntegrationDeploymentTests(unittest.TestCase):
                 combined_output = f"{helper_stdout}\n{helper_stderr}"
                 self.assertIn(
                     "Approving browser pairing request:",
+                    combined_output,
+                )
+                helper_payload = self._extract_json_payload(
+                    combined_output,
+                    "openclaw-approve-browser output",
+                )
+                self.assertTrue(
+                    str(helper_payload.get("requestId") or "").strip(),
+                    combined_output,
+                )
+                self.assertTrue(
+                    str(helper_payload.get("deviceId") or "").strip(),
                     combined_output,
                 )
 
