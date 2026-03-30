@@ -182,9 +182,9 @@ Dashboard URL: https://your-hostname/#token=...
 openclaw-approve-browser
 ```
 
-该 helper uses the official OpenClaw CLI gateway call path 并批准最新的 Control UI 请求。如果提示没有待处理的配对请求，请保持浏览器停留在配对页面，等待几秒后重试。命令执行完毕后，回到浏览器刷新页面即可。
+该 helper 会先尝试 OpenClaw CLI 的 pairing RPC 路径；如果当前上游版本在这台主机上拒绝 `device.pair.*`，则自动回退到 `openclaw devices list/approve` 并批准最新的 Control UI 请求。如果提示没有待处理的配对请求，请保持浏览器停留在配对页面，等待几秒后重试。命令执行完毕后，回到浏览器刷新页面即可。
 
-> OpenClaw 上游 `2026.3.12` 到 `2026.3.13` 期间存在已知的 loopback WebSocket 握手回归，`openclaw devices list` 可能报错，但本模板的 `openclaw-approve-browser` 走官方 `openclaw gateway call device.pair.*` CLI 路径，不依赖内部 dist 结构。
+> OpenClaw 上游 `2026.3.12` 到 `2026.3.13` 期间存在已知的 loopback WebSocket 握手回归。`openclaw-approve-browser` 不依赖内部 dist 结构，会优先尝试官方 `openclaw gateway call device.pair.*` CLI 路径，并在需要时自动回退到 `openclaw devices list/approve`。
 
 ## 9.（可选）Teams 部署后配置
 
@@ -452,9 +452,9 @@ If the browser shows `pairing required`, **keep the page open**, return to SSH a
 openclaw-approve-browser
 ```
 
-This helper uses the official OpenClaw CLI gateway call path and approves the newest Control UI request. If it reports no pending request, keep the browser on the pairing page, wait a few seconds, and retry. After the command succeeds, refresh the browser page.
+This helper tries the OpenClaw CLI pairing RPC first and falls back to the devices CLI when the current upstream build rejects `device.pair.*` on this host. It then approves the newest Control UI request. If it reports no pending request, keep the browser on the pairing page, wait a few seconds, and retry. After the command succeeds, refresh the browser page.
 
-> Known upstream note: OpenClaw `2026.3.12` through `2026.3.13` has a reported loopback WebSocket handshake regression on some hosts. The `openclaw-approve-browser` helper uses the official `openclaw gateway call device.pair.*` path and does not depend on internal dist module structure.
+> Known upstream note: OpenClaw `2026.3.12` through `2026.3.13` has a reported loopback WebSocket handshake regression on some hosts. The `openclaw-approve-browser` helper does not depend on internal dist module structure; it prefers the official `openclaw gateway call device.pair.*` path and falls back to `openclaw devices list/approve` when needed.
 
 ## 9. (Optional) Post-Deployment Teams Setup
 

@@ -250,7 +250,15 @@ class AzureDeployTemplateTests(unittest.TestCase):
             self.bootstrap_script,
         )
         self.assertIn(
+            'openclaw devices list --json 2>&1',
+            self.bootstrap_script,
+        )
+        self.assertIn(
             "openclaw gateway call device.pair.approve --json --params",
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            'openclaw devices approve "$request_id" --json 2>&1',
             self.bootstrap_script,
         )
         self.assertIn(
@@ -513,7 +521,15 @@ class AzureDeployTemplateTests(unittest.TestCase):
             arm_bootstrap_script,
         )
         self.assertIn(
+            "openclaw devices list --json 2>&1",
+            arm_bootstrap_script,
+        )
+        self.assertIn(
             "openclaw gateway call device.pair.approve --json --params",
+            arm_bootstrap_script,
+        )
+        self.assertIn(
+            'openclaw devices approve "$request_id" --json 2>&1',
             arm_bootstrap_script,
         )
         self.assertIn("list_browser_request_id()", arm_bootstrap_script)
@@ -560,7 +576,7 @@ class AzureDeployTemplateTests(unittest.TestCase):
 
     def test_readme_documents_manual_browser_pairing_fallback(self):
         self.assertIn("openclaw-approve-browser", self.readme)
-        self.assertIn("uses the official OpenClaw CLI gateway call", self.readme)
+        self.assertIn("tries the OpenClaw CLI pairing RPC first and falls back to the devices CLI", self.readme)
         self.assertIn(
             "OpenClaw 上游 `2026.3.12` 到 `2026.3.13` 期间存在已知的 loopback WebSocket 握手回归",
             self.readme,
@@ -569,6 +585,7 @@ class AzureDeployTemplateTests(unittest.TestCase):
             "Known upstream note: OpenClaw `2026.3.12` through `2026.3.13` has a reported loopback WebSocket handshake regression",
             self.readme,
         )
+        self.assertIn("falls back to `openclaw devices list/approve`", self.readme)
         self.assertNotIn("reads the local browser pairing queue directly", self.readme)
         self.assertNotIn(
             "If you need to temporarily restore that wrapper path on an already deployed VM",
@@ -598,6 +615,10 @@ class AzureDeployTemplateTests(unittest.TestCase):
 
         self.assertIn(
             'openclaw gateway call device.pair.list --json --params "{{}}"',
+            format_string,
+        )
+        self.assertIn(
+            'openclaw devices list --json 2>&1',
             format_string,
         )
         self.assertIn("OPENCLAW_ALLOWED_ORIGINS_JSON='{13}'", format_string)
