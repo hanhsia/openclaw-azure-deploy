@@ -123,7 +123,7 @@ az deployment group show \
 如果您选择了 Managed Identity 认证模式，模板会**自动尝试**为 VM 的托管标识分配 `Cognitive Services OpenAI User` 角色。
 
 - **权限充足时（Owner / User Access Administrator）：** 角色自动分配成功，无需额外操作。
-- **权限不足时（如 Contributor）：** 角色分配会失败，Azure 门户可能显示部署为"部分失败"。但 **VM、OpenClaw、MI 代理服务全部正常运行**，不需要重新部署。您只需手动补上角色，下一次 chat 请求即可正常工作。
+- **权限不足时（如 Contributor）：** 角色分配会失败，Azure 门户可能显示部署为"部分失败"。但 **VM 和 OpenClaw 仍会正常完成部署**，不需要重新部署。您只需手动补上角色，下一次 chat 请求即可正常工作。
 
 部署输出中的 `azureOpenAiRoleAssignmentHint` 包含可直接复制执行的完整 `az role assignment create` 命令。
 
@@ -393,7 +393,7 @@ az deployment group show \
 If you chose Managed Identity authentication, the template **automatically attempts** to assign the `Cognitive Services OpenAI User` role to the VM's managed identity.
 
 - **When permissions are sufficient (Owner / User Access Administrator):** The role is assigned automatically. No further action needed.
-- **When permissions are insufficient (e.g. Contributor):** The role assignment fails, and the Azure portal may show the deployment as "partially failed". However, **the VM, OpenClaw, and MI proxy service are all fully functional** — no redeployment is needed. Just assign the role manually, and the next chat request will work immediately.
+- **When permissions are insufficient (e.g. Contributor):** The role assignment fails, and the Azure portal may show the deployment as "partially failed". However, **the VM and OpenClaw are still fully deployed** — no redeployment is needed. Just assign the role manually, and the next chat request will work immediately.
 
 The deployment output `azureOpenAiRoleAssignmentHint` contains the exact `az role assignment create` command you can copy and run.
 

@@ -1,5 +1,10 @@
 import json
+import os
 import re
+import shutil
+import subprocess
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -46,6 +51,46 @@ def expected_public_control_url(
     if hostname:
         return f"https://{hostname}/"
     return f"https://{expected_public_fqdn(vm_name, location, cloud_name)}/"
+
+
+def to_bash_path(path: Path) -> str:
+    resolved = path.resolve().as_posix()
+    if len(resolved) >= 3 and resolved[1:3] == ":/":
+        return f"/{resolved[0].lower()}{resolved[2:]}"
+    return resolved
+
+
+def extract_shell_function(script_text: str, function_name: str) -> str:
+    lines = script_text.splitlines()
+    start_index = None
+    for index, line in enumerate(lines):
+        if line == f"{function_name}() {{":
+            start_index = index
+            break
+
+    if start_index is None:
+        raise ValueError(f"Function {function_name} was not found in script")
+
+    function_lines = []
+    heredoc_terminator = None
+    heredoc_pattern = re.compile(r"<<-?\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?")
+
+    for line in lines[start_index:]:
+        function_lines.append(line)
+        if heredoc_terminator is not None:
+            if line.strip() == heredoc_terminator:
+                heredoc_terminator = None
+            continue
+
+        match = heredoc_pattern.search(line)
+        if match:
+            heredoc_terminator = match.group(1)
+            continue
+
+        if line == "}" and len(function_lines) > 1:
+            return "\n".join(function_lines) + "\n"
+
+    raise ValueError(f"Function {function_name} did not terminate cleanly")
 
 
 class AzureDeployTemplateTests(unittest.TestCase):
@@ -250,7 +295,7 @@ class AzureDeployTemplateTests(unittest.TestCase):
             self.bootstrap_script,
         )
         self.assertIn(
-            'openclaw devices list --json 2>&1',
+            "openclaw devices list --json 2>&1",
             self.bootstrap_script,
         )
         self.assertIn(
@@ -290,7 +335,7 @@ class AzureDeployTemplateTests(unittest.TestCase):
             self.bootstrap_script,
         )
         self.assertIn(
-            "apt-get install -y ca-certificates curl git gnupg caddy build-essential procps file",
+            "apt-get install -y apt-transport-https ca-certificates curl git gnupg lsb-release caddy build-essential procps file",
             self.bootstrap_script,
         )
         self.assertIn(
@@ -457,7 +502,7 @@ class AzureDeployTemplateTests(unittest.TestCase):
             self.bootstrap_script,
         )
         self.assertIn(
-            'run_openclaw_config_json models.providers.openai "$OPENCLAW_AZURE_OPENAI_PROVIDER_JSON"',
+            'run_openclaw_config_json models.providers.microsoft-foundry "$OPENCLAW_AZURE_OPENAI_PROVIDER_JSON"',
             self.bootstrap_script,
         )
         self.assertNotIn(".openclaw-env.sh", arm_bootstrap_script)
@@ -538,6 +583,7 @@ class AzureDeployTemplateTests(unittest.TestCase):
         self.assertIn("payload.get(''device'') or {{}}", arm_bootstrap_script)
         self.assertNotIn('PAIRING_LIST_JS_B64="', arm_bootstrap_script)
         self.assertNotIn('PAIRING_APPROVE_JS_B64="', arm_bootstrap_script)
+
         self.assertIn("set -eux\n", arm_bootstrap_script)
         self.assertNotIn("set -euxo pipefail", arm_bootstrap_script)
         self.assertIn(
@@ -574,9 +620,176 @@ class AzureDeployTemplateTests(unittest.TestCase):
             "systemctl enable openclaw-gateway caddy", self.bootstrap_script
         )
 
+    def test_teams_pairing_helper_no_pending_request_exits_cleanly(self):
+        bash_executable = shutil.which("bash")
+        if not bash_executable:
+            self.skipTest("bash is required to execute the Teams pairing helper")
+
+        with tempfile.TemporaryDirectory(prefix="openclaw-teams-helper-") as temp_dir:
+            temp_path = Path(temp_dir)
+            fake_openclaw = temp_path / "openclaw"
+            fake_openclaw.write_text(
+                "#!/usr/bin/env bash\n"
+                "set -euo pipefail\n"
+                'if [ "$#" -eq 4 ] && [ "$1" = "pairing" ] && [ "$2" = "list" ] && [ "$3" = "msteams" ] && [ "$4" = "--json" ]; then\n'
+                '  printf \'%s\\n\' \'{"channel":"msteams","requests":[]}\'\n'
+                "  exit 0\n"
+                "fi\n"
+                'echo "unexpected openclaw invocation: $*" >&2\n'
+                "exit 99\n",
+                encoding="utf-8",
+            )
+            os.chmod(fake_openclaw, 0o755)
+
+            fake_python = temp_path / "python3"
+            fake_python.write_text(
+                "#!/usr/bin/env bash\n"
+                f'exec "{to_bash_path(Path(sys.executable))}" "$@"\n',
+                encoding="utf-8",
+            )
+            os.chmod(fake_python, 0o755)
+
+            helper_script = (
+                REPO_ROOT / "openclaw-approve-teams-pairing.template.sh"
+            ).read_text(encoding="utf-8")
+            helper_script = helper_script.replace("{5}", "$(id -un)")
+            helper_script = helper_script.replace(
+                "/usr/local/bin/openclaw", to_bash_path(fake_openclaw)
+            )
+
+            helper_path = temp_path / "openclaw-approve-teams-pairing"
+            helper_path.write_text(helper_script, encoding="utf-8")
+            os.chmod(helper_path, 0o755)
+
+            env = os.environ.copy()
+            env["PATH"] = f"{to_bash_path(temp_path)}:{env.get('PATH', '')}"
+
+            result = subprocess.run(
+                [bash_executable, to_bash_path(helper_path)],
+                cwd=REPO_ROOT,
+                capture_output=True,
+                text=True,
+                env=env,
+                check=False,
+            )
+
+            combined_output = f"{result.stdout}\n{result.stderr}"
+            self.assertEqual(result.returncode, 0, combined_output)
+            self.assertIn(
+                "No pending Teams pairing requests. Send a DM to the bot first, or pass the pairing code explicitly.",
+                combined_output,
+            )
+
+    def test_write_openclaw_auth_profile_survives_sudo_env_reset(self):
+        bash_executable = shutil.which("bash")
+        if not bash_executable:
+            self.skipTest("bash is required to execute the auth profile helper")
+
+        with tempfile.TemporaryDirectory(prefix="openclaw-auth-profile-") as temp_dir:
+            temp_path = Path(temp_dir)
+            fake_sudo = temp_path / "sudo"
+            fake_sudo.write_text(
+                "#!/usr/bin/env bash\n"
+                "set -euo pipefail\n"
+                'if [ "${1:-}" = "-u" ]; then\n'
+                "  shift 2\n"
+                "fi\n"
+                'exec env -i PATH="$PATH" HOME="${HOME:-}" "$@"\n',
+                encoding="utf-8",
+            )
+            os.chmod(fake_sudo, 0o755)
+
+            fake_python = temp_path / "python3"
+            fake_python.write_text(
+                "#!/usr/bin/env bash\n"
+                f'exec "{to_bash_path(Path(sys.executable))}" "$@"\n',
+                encoding="utf-8",
+            )
+            os.chmod(fake_python, 0o755)
+
+            function_text = extract_shell_function(
+                self.bootstrap_script, "write_openclaw_auth_profile"
+            )
+            function_text = function_text.replace(
+                'install -d -o {5} -g {5} "$(dirname "$auth_store_path")"',
+                'mkdir -p "$(dirname "$auth_store_path")"',
+            )
+            function_text = function_text.replace(
+                "sudo -u {5}",
+                'sudo -u "$TEST_USER"',
+            )
+            function_text = function_text.replace(
+                'HOME="/home/{5}"',
+                'HOME="$TEST_HOME"',
+            )
+            function_text = function_text.replace(
+                "/home/{5}/.openclaw/agents/main/agent/auth-profiles.json",
+                "${TEST_HOME}/.openclaw/agents/main/agent/auth-profiles.json",
+            )
+
+            test_home = temp_path / "home"
+            auth_store_path = (
+                test_home
+                / ".openclaw"
+                / "agents"
+                / "main"
+                / "agent"
+                / "auth-profiles.json"
+            )
+
+            helper_script = (
+                "#!/usr/bin/env bash\n"
+                "set -euo pipefail\n"
+                f'export PATH="{to_bash_path(temp_path)}:$PATH"\n'
+                f'export TEST_HOME="{to_bash_path(test_home)}"\n'
+                'export TEST_USER="$(id -un)"\n'
+                'mkdir -p "$TEST_HOME"\n'
+                f"{function_text}"
+                'write_openclaw_auth_profile \'microsoft-foundry:entra\' \'{"type":"api_key","provider":"microsoft-foundry","key":"__entra_id_dynamic__"}\'\n'
+            )
+
+            helper_path = temp_path / "write-openclaw-auth-profile.sh"
+            helper_path.write_text(helper_script, encoding="utf-8")
+            os.chmod(helper_path, 0o755)
+
+            result = subprocess.run(
+                [bash_executable, to_bash_path(helper_path)],
+                cwd=REPO_ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined_output = f"{result.stdout}\n{result.stderr}"
+            self.assertEqual(result.returncode, 0, combined_output)
+            self.assertTrue(
+                auth_store_path.exists(),
+                combined_output,
+            )
+
+            auth_store = json.loads(auth_store_path.read_text(encoding="utf-8"))
+            self.assertEqual(auth_store.get("version"), 1)
+            self.assertEqual(
+                auth_store.get("profiles", {})
+                .get("microsoft-foundry:entra", {})
+                .get("key"),
+                "__entra_id_dynamic__",
+            )
+
+    def test_bootstrap_script_installs_azure_cli_for_foundry_entra_auth(self):
+        arm_bootstrap_script = self.template["variables"]["bootstrapScript"]
+        self.assertIn("packages.microsoft.com/repos/azure-cli/", self.bootstrap_script)
+        self.assertIn("apt-get install -y azure-cli", self.bootstrap_script)
+        self.assertIn("command -v az >/dev/null 2>&1", self.bootstrap_script)
+        self.assertIn("packages.microsoft.com/repos/azure-cli/", arm_bootstrap_script)
+        self.assertIn("apt-get install -y azure-cli", arm_bootstrap_script)
+
     def test_readme_documents_manual_browser_pairing_fallback(self):
         self.assertIn("openclaw-approve-browser", self.readme)
-        self.assertIn("tries the OpenClaw CLI pairing RPC first and falls back to the devices CLI", self.readme)
+        self.assertIn(
+            "tries the OpenClaw CLI pairing RPC first and falls back to the devices CLI",
+            self.readme,
+        )
         self.assertIn(
             "OpenClaw 上游 `2026.3.12` 到 `2026.3.13` 期间存在已知的 loopback WebSocket 握手回归",
             self.readme,
@@ -618,7 +831,7 @@ class AzureDeployTemplateTests(unittest.TestCase):
             format_string,
         )
         self.assertIn(
-            'openclaw devices list --json 2>&1',
+            "openclaw devices list --json 2>&1",
             format_string,
         )
         self.assertIn("OPENCLAW_ALLOWED_ORIGINS_JSON='{13}'", format_string)
@@ -856,29 +1069,76 @@ class AzureDeployTemplateTests(unittest.TestCase):
         self.assertIn("azureOpenAiResourceGroup", parameters)
         self.assertEqual(parameters["azureOpenAiResourceGroup"]["defaultValue"], "")
 
-    def test_bootstrap_script_contains_managed_identity_proxy(self):
+    def test_bootstrap_script_configures_managed_identity_foundry_auth(self):
         self.assertIn("OPENCLAW_AZURE_OPENAI_AUTH_MODE='{2}'", self.bootstrap_script)
-        self.assertIn("azure-openai-mi-proxy", self.bootstrap_script)
-        self.assertIn("TokenManager", self.bootstrap_script)
         self.assertIn(
-            "169.254.169.254/metadata/identity/oauth2/token",
+            "az login --identity --allow-no-subscriptions --output none",
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            "az account get-access-token --resource https://cognitiveservices.azure.com --output none",
+            self.bootstrap_script,
+        )
+        self.assertIn("/agents/main/agent/auth-profiles.json", self.bootstrap_script)
+        self.assertIn('"key": "__entra_id_dynamic__"', self.bootstrap_script)
+        self.assertIn('"authMethod": "entra-id"', self.bootstrap_script)
+        self.assertIn(
+            'run_openclaw_config_json auth.profiles \'{"microsoft-foundry:entra":{"provider":"microsoft-foundry","mode":"api_key"}}\'',
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            'run_openclaw_config_json auth.order \'{"microsoft-foundry":["microsoft-foundry:entra"]}\'',
             self.bootstrap_script,
         )
         self.assertIn("cognitiveservices.azure.com", self.bootstrap_script)
-        self.assertIn("azure-openai-mi-proxy.service", self.bootstrap_script)
         self.assertIn(
             'if [ "$OPENCLAW_AZURE_OPENAI_AUTH_MODE" = "managedIdentity" ]',
             self.bootstrap_script,
         )
-        self.assertIn('"apiKey": "managed-identity"', self.bootstrap_script)
+        self.assertNotIn("azure-openai-mi-proxy", self.bootstrap_script)
+        self.assertNotIn("TokenManager", self.bootstrap_script)
+        self.assertNotIn(
+            "169.254.169.254/metadata/identity/oauth2/token",
+            self.bootstrap_script,
+        )
+        self.assertNotIn("azure-openai-mi-proxy.service", self.bootstrap_script)
+        self.assertNotIn('"apiKey": "managed-identity"', self.bootstrap_script)
         self.assertIn(
             '"apiKey": "$OPENCLAW_AZURE_OPENAI_API_KEY"', self.bootstrap_script
         )
 
-    def test_bootstrap_script_sets_model_allowlist(self):
+    def test_bootstrap_script_sets_foundry_model_allowlist(self):
         self.assertIn(
-            'run_openclaw_config_json agents.defaults.models "{\\"openai/$OPENCLAW_AZURE_OPENAI_DEPLOYMENT\\":{}}"',
+            'run_openclaw_config_json agents.defaults.models "{\\"microsoft-foundry/$OPENCLAW_AZURE_OPENAI_DEPLOYMENT\\":{}}"',
             self.bootstrap_script,
+        )
+
+    def test_bootstrap_script_uses_foundry_provider_for_api_key_auth(self):
+        arm_bootstrap_script = self.template["variables"]["bootstrapScript"]
+        self.assertIn(
+            'run_openclaw_config_string agents.defaults.model.primary "microsoft-foundry/$OPENCLAW_AZURE_OPENAI_DEPLOYMENT"',
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            'run_openclaw_config_json models.providers.microsoft-foundry "$OPENCLAW_AZURE_OPENAI_PROVIDER_JSON"',
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            'run_openclaw_config_json agents.defaults.models "{\\"microsoft-foundry/$OPENCLAW_AZURE_OPENAI_DEPLOYMENT\\":{}}"',
+            self.bootstrap_script,
+        )
+        self.assertIn('"authHeader": false', self.bootstrap_script)
+        self.assertIn(
+            '"headers": { "api-key": "$OPENCLAW_AZURE_OPENAI_API_KEY" }',
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            'run_openclaw_config_json models.providers.microsoft-foundry "$OPENCLAW_AZURE_OPENAI_PROVIDER_JSON"',
+            arm_bootstrap_script,
+        )
+        self.assertIn(
+            'run_openclaw_config_string agents.defaults.model.primary "microsoft-foundry/$OPENCLAW_AZURE_OPENAI_DEPLOYMENT"',
+            arm_bootstrap_script,
         )
 
     def test_ui_definition_contains_auth_mode_dropdown(self):

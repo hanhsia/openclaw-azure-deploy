@@ -277,7 +277,7 @@ class AzureIntegrationDeploymentTests(unittest.TestCase):
             script_stdout,
         )
         self.assertIn(
-            'openclaw devices list --json 2>&1',
+            "openclaw devices list --json 2>&1",
             script_stdout,
         )
         self.assertIn(
@@ -303,6 +303,7 @@ class AzureIntegrationDeploymentTests(unittest.TestCase):
                 "bash -lc '"
                 'printf "openclaw_path=%s\\n" "$(command -v openclaw)" '
                 '&& printf "npm_path=%s\\n" "$(command -v npm)" '
+                '&& printf "az_path=%s\\n" "$(command -v az || true)" '
                 '&& printf "openclaw_version=%s\\n" "$(/usr/local/bin/openclaw --version | head -n 1)" '
                 '&& printf "node_version=%s\\n" "$(/home/{user}/.openclaw/tools/node/bin/node -v)" '
                 '&& printf "state_dir=%s\\n" "$OPENCLAW_STATE_DIR" '
@@ -345,6 +346,10 @@ class AzureIntegrationDeploymentTests(unittest.TestCase):
         self.assertEqual(
             values.get("npm_path"),
             f"/home/{DEFAULT_ADMIN_USERNAME}/.openclaw/tools/node/bin/npm",
+        )
+        self.assertTrue(
+            values.get("az_path", "").endswith("/az"),
+            "Azure CLI must be installed on the VM and available in PATH",
         )
         self.assertTrue(values.get("openclaw_version", "").startswith("OpenClaw "))
         self.assertEqual(values.get("node_version"), "v24.14.0")
@@ -1373,6 +1378,14 @@ class AzureIntegrationDeploymentTests(unittest.TestCase):
                     outputs,
                     self.env.get("TEST_AZURE_OPENAI_DEPLOYMENT", "").strip(),
                 )
+            elif all(openai_values):
+                self._validate_api_key_runtime(
+                    cloud_name,
+                    vm_public_fqdn,
+                    outputs,
+                    openai_values[0],
+                    openai_values[1],
+                )
 
             self._apply_devices_list_workaround(cloud_name, vm_public_fqdn)
             self._assert_pairing_rpc_stable(cloud_name, vm_public_fqdn)
@@ -1540,7 +1553,7 @@ class AzureIntegrationDeploymentTests(unittest.TestCase):
     ):
         self._log(
             cloud_name,
-            "Validating managed identity runtime: proxy service, model allowlist, deployment outputs",
+            "Validating managed identity runtime: Foundry Entra auth, model allowlist, deployment outputs",
         )
 
         # 1. Validate deployment outputs
@@ -1561,91 +1574,221 @@ class AzureIntegrationDeploymentTests(unittest.TestCase):
             f"vmPrincipalId={vm_principal_id}",
         )
 
-        # 2. Validate MI proxy service is running on the VM
-        proxy_stdout, _ = self._run_ssh(
-            cloud_name,
-            vm_public_fqdn,
-            (
-                "bash -lc '"
-                'printf "mi_proxy_active=%s\n" "$(sudo systemctl is-active azure-openai-mi-proxy)" '
-                '&& printf "mi_proxy_health=%s\n" "$(curl --fail --silent --max-time 5 http://127.0.0.1:18790/health 2>/dev/null || echo fail)" '
-                '&& printf "mi_proxy_script=%s\n" "$(test -x /usr/local/bin/azure-openai-mi-proxy && echo present || echo missing)" '
-                "'"
-            ),
-        )
-        proxy_values = {}
-        for line in proxy_stdout.splitlines():
-            if "=" in line:
-                key, value = line.split("=", 1)
-                proxy_values[key.strip()] = value.strip()
-        self.assertEqual(
-            proxy_values.get("mi_proxy_active"),
-            "active",
-            "azure-openai-mi-proxy systemd service must be active",
-        )
-        self.assertEqual(
-            proxy_values.get("mi_proxy_health"),
-            "ok",
-            "MI proxy /health endpoint must return ok",
-        )
-        self.assertEqual(
-            proxy_values.get("mi_proxy_script"),
-            "present",
-            "MI proxy script must exist and be executable",
-        )
+        # 2. Validate VM-side Azure CLI login and Foundry auth wiring.
+        expected_endpoint = self.env.get("TEST_AZURE_OPENAI_ENDPOINT", "").strip()
+        normalized_endpoint = expected_endpoint.rstrip("/")
+        expected_base_url = f"{normalized_endpoint}/openai/v1/"
 
-        # 3. Validate OpenClaw config uses local proxy and model allowlist
         config_stdout, _ = self._run_ssh(
             cloud_name,
             vm_public_fqdn,
             (
-                "bash -lc '"
-                'printf "provider_base_url=%s\n" "$(/usr/local/bin/openclaw config get models.providers.openai.baseUrl)" '
-                '&& printf "provider_api_key=%s\n" "$(/usr/local/bin/openclaw config get models.providers.openai.apiKey)" '
-                '&& printf "default_model=%s\n" "$(/usr/local/bin/openclaw config get agents.defaults.model.primary)" '
-                '&& printf "models_mode=%s\n" "$(/usr/local/bin/openclaw config get models.mode)" '
-                "&& /usr/local/bin/openclaw config get agents.defaults.models --strict-json 2>/dev/null | head -n 20 "
-                "'"
+                "python3 - <<'PY'\n"
+                "import json\n"
+                "import subprocess\n"
+                "from pathlib import Path\n"
+                'config = json.loads(Path.home().joinpath(".openclaw", "openclaw.json").read_text(encoding="utf-8"))\n'
+                'providers = (((config.get("models") or {}).get("providers")) or {})\n'
+                'foundry = providers.get("microsoft-foundry") or {}\n'
+                'headers = foundry.get("headers") or {}\n'
+                'default_model = ((((config.get("agents") or {}).get("defaults")) or {}).get("model") or {}).get("primary") or ""\n'
+                'models_mode = ((config.get("models") or {}).get("mode")) or ""\n'
+                'allowlist = ((((config.get("agents") or {}).get("defaults")) or {}).get("models")) or {}\n'
+                'auth_profiles = (((config.get("auth") or {}).get("profiles")) or {})\n'
+                'auth_order = ((((config.get("auth") or {}).get("order")) or {}).get("microsoft-foundry")) or []\n'
+                'auth_store_path = Path.home().joinpath(".openclaw", "agents", "main", "agent", "auth-profiles.json")\n'
+                'store = json.loads(auth_store_path.read_text(encoding="utf-8")) if auth_store_path.exists() else {}\n'
+                'profile = ((store.get("profiles") or {}).get("microsoft-foundry:entra")) or {}\n'
+                'metadata = profile.get("metadata") or {}\n'
+                'az_show = subprocess.run(["az", "account", "show", "--output", "json"], text=True, capture_output=True)\n'
+                'az_token = subprocess.run(["az", "account", "get-access-token", "--resource", "https://cognitiveservices.azure.com", "--output", "json"], text=True, capture_output=True)\n'
+                "print(f\"mi_proxy_service_present={str(Path('/etc/systemd/system/azure-openai-mi-proxy.service').exists()).lower()}\")\n"
+                'print(f"foundry_provider_present={str(bool(foundry)).lower()}")\n'
+                'print(f"provider_base_url={foundry.get("baseUrl") or ""}")\n'
+                'print(f"provider_api_key_present={str(bool(foundry.get("apiKey"))).lower()}")\n'
+                'print(f"provider_headers_api_key_present={str(bool(headers.get("api-key"))).lower()}")\n'
+                'print(f"default_model={default_model}")\n'
+                'print(f"models_mode={models_mode}")\n'
+                'print(f"allowlist_has_default_model={str(default_model in allowlist).lower()}")\n'
+                'print(f"auth_profile_binding_present={str(bool(auth_profiles.get("microsoft-foundry:entra"))).lower()}")\n'
+                'print(f"auth_profile_binding_provider={(auth_profiles.get("microsoft-foundry:entra") or {}).get("provider") or ""}")\n'
+                'print(f"auth_profile_binding_mode={(auth_profiles.get("microsoft-foundry:entra") or {}).get("mode") or ""}")\n'
+                'print(f"auth_order_first={auth_order[0] if auth_order else ""}")\n'
+                'print(f"auth_store_present={str(auth_store_path.exists()).lower()}")\n'
+                'print(f"auth_store_profile_type={profile.get("type") or ""}")\n'
+                'print(f"auth_store_profile_provider={profile.get("provider") or ""}")\n'
+                'print(f"auth_store_profile_key={profile.get("key") or ""}")\n'
+                'print(f"auth_store_metadata_auth_method={metadata.get("authMethod") or ""}")\n'
+                'print(f"auth_store_metadata_endpoint={metadata.get("endpoint") or ""}")\n'
+                'print(f"auth_store_metadata_model_id={metadata.get("modelId") or ""}")\n'
+                'print(f"auth_store_metadata_api={metadata.get("api") or ""}")\n'
+                'print(f"az_account_show_ok={str(az_show.returncode == 0).lower()}")\n'
+                'print(f"az_token_ok={str(az_token.returncode == 0).lower()}")\n'
+                "if az_show.returncode == 0:\n"
+                "    account = json.loads(az_show.stdout)\n"
+                '    print(f"az_account_user_name={(account.get("user") or {}).get("name") or ""}")\n'
+                '    print(f"az_account_tenant_id={account.get("tenantId") or ""}")\n'
+                "PY"
             ),
         )
         config_values = {}
-        extra_lines = []
         for line in config_stdout.splitlines():
-            if "=" in line and not line.startswith("{") and not line.startswith(" "):
-                key, value = line.split("=", 1)
-                config_values[key.strip()] = value.strip()
-            else:
-                extra_lines.append(line)
+            if "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            config_values[key.strip()] = value.strip()
+
+        self.assertEqual(
+            config_values.get("mi_proxy_service_present"),
+            "false",
+            "Managed identity Foundry mode must not install the legacy MI proxy service",
+        )
+        self.assertEqual(config_values.get("foundry_provider_present"), "true")
         self.assertEqual(
             config_values.get("provider_base_url"),
-            "http://127.0.0.1:18790/openai/v1/",
-            "Provider base URL must point to local MI proxy",
+            expected_base_url,
+            "Provider base URL must point to the Azure OpenAI / Foundry endpoint",
         )
-        self.assertIn(
-            config_values.get("provider_api_key"),
-            ("managed-identity", "__OPENCLAW_REDACTED__"),
-            "Provider apiKey must be the managed-identity placeholder (or redacted by newer OpenClaw)",
-        )
+        self.assertEqual(config_values.get("provider_api_key_present"), "false")
+        self.assertEqual(config_values.get("provider_headers_api_key_present"), "false")
         if expected_deployment:
             self.assertEqual(
                 config_values.get("default_model"),
-                f"openai/{expected_deployment}",
+                f"microsoft-foundry/{expected_deployment}",
             )
-
-        # Verify model allowlist contains only the configured deployment
-        # Note: OpenClaw 2026.3.28+ may redact or change the output format of
-        # agents.defaults.models, so this check is best-effort.
-        allowlist_text = "\n".join(extra_lines)
-        if expected_deployment and allowlist_text.strip():
-            self.assertIn(
-                f"openai/{expected_deployment}",
-                allowlist_text,
-                "Model allowlist must contain the configured deployment model",
-            )
+        self.assertEqual(config_values.get("models_mode"), "merge")
+        self.assertEqual(config_values.get("allowlist_has_default_model"), "true")
+        self.assertEqual(config_values.get("auth_profile_binding_present"), "true")
+        self.assertEqual(
+            config_values.get("auth_profile_binding_provider"),
+            "microsoft-foundry",
+        )
+        self.assertEqual(config_values.get("auth_profile_binding_mode"), "api_key")
+        self.assertEqual(
+            config_values.get("auth_order_first"),
+            "microsoft-foundry:entra",
+        )
+        self.assertEqual(config_values.get("auth_store_present"), "true")
+        self.assertEqual(config_values.get("auth_store_profile_type"), "api_key")
+        self.assertEqual(
+            config_values.get("auth_store_profile_provider"),
+            "microsoft-foundry",
+        )
+        self.assertEqual(
+            config_values.get("auth_store_profile_key"),
+            "__entra_id_dynamic__",
+        )
+        self.assertEqual(
+            config_values.get("auth_store_metadata_auth_method"),
+            "entra-id",
+        )
+        self.assertEqual(
+            config_values.get("auth_store_metadata_endpoint"),
+            normalized_endpoint,
+        )
+        self.assertEqual(
+            config_values.get("auth_store_metadata_model_id"),
+            expected_deployment,
+        )
+        self.assertEqual(
+            config_values.get("auth_store_metadata_api"), "openai-responses"
+        )
+        self.assertEqual(config_values.get("az_account_show_ok"), "true")
+        self.assertEqual(config_values.get("az_token_ok"), "true")
+        self.assertTrue(
+            config_values.get("az_account_user_name"),
+            "Azure CLI account info must be available after az login --identity",
+        )
+        self.assertTrue(
+            config_values.get("az_account_tenant_id"),
+            "Azure CLI tenant id must be available after az login --identity",
+        )
 
         self._log(
             cloud_name,
             "Managed identity runtime validation passed",
+        )
+
+    def _validate_api_key_runtime(
+        self,
+        cloud_name,
+        vm_public_fqdn,
+        outputs,
+        expected_endpoint,
+        expected_deployment,
+    ):
+        self._log(
+            cloud_name,
+            "Validating API key runtime: Foundry provider config, default model, and no MI proxy service",
+        )
+
+        auth_mode_output = outputs.get("azureOpenAiAuthMode", {}).get("value", "")
+        self.assertEqual(auth_mode_output, "key")
+        role_hint = outputs.get("azureOpenAiRoleAssignmentHint", {}).get("value", "")
+        self.assertEqual(
+            role_hint,
+            "",
+            "Role-assignment hint should be empty for API key deployments",
+        )
+
+        expected_base_url = expected_endpoint
+        if expected_base_url.endswith("/"):
+            expected_base_url = f"{expected_base_url}openai/v1/"
+        else:
+            expected_base_url = f"{expected_base_url}/openai/v1/"
+
+        config_stdout, _ = self._run_ssh(
+            cloud_name,
+            vm_public_fqdn,
+            (
+                "python3 - <<'PY'\n"
+                "import json\n"
+                "from pathlib import Path\n"
+                'config = json.loads(Path.home().joinpath(".openclaw", "openclaw.json").read_text(encoding="utf-8"))\n'
+                'providers = (((config.get("models") or {}).get("providers")) or {})\n'
+                'foundry = providers.get("microsoft-foundry") or {}\n'
+                'headers = foundry.get("headers") or {}\n'
+                'default_model = ((((config.get("agents") or {}).get("defaults")) or {}).get("model") or {}).get("primary") or ""\n'
+                'models_mode = ((config.get("models") or {}).get("mode")) or ""\n'
+                'allowlist = ((((config.get("agents") or {}).get("defaults")) or {}).get("models")) or {}\n'
+                "print(f\"mi_proxy_service_present={str(Path('/etc/systemd/system/azure-openai-mi-proxy.service').exists()).lower()}\")\n"
+                'print(f"foundry_provider_present={str(bool(foundry)).lower()}")\n'
+                "print(f\"provider_base_url={foundry.get('baseUrl') or ''}\")\n"
+                "print(f\"provider_api_key_present={str(bool(foundry.get('apiKey'))).lower()}\")\n"
+                "print(f\"provider_auth_header={str(foundry.get('authHeader')).lower()}\")\n"
+                "print(f\"provider_headers_api_key_present={str(bool(headers.get('api-key'))).lower()}\")\n"
+                'print(f"default_model={default_model}")\n'
+                'print(f"models_mode={models_mode}")\n'
+                'print(f"allowlist_has_default_model={str(default_model in allowlist).lower()}")\n'
+                "PY"
+            ),
+        )
+        config_values = {}
+        for line in config_stdout.splitlines():
+            if "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            config_values[key.strip()] = value.strip()
+
+        self.assertEqual(config_values.get("mi_proxy_service_present"), "false")
+        self.assertEqual(config_values.get("foundry_provider_present"), "true")
+        self.assertEqual(config_values.get("provider_base_url"), expected_base_url)
+        self.assertEqual(config_values.get("provider_api_key_present"), "true")
+        self.assertEqual(config_values.get("provider_auth_header"), "false")
+        self.assertEqual(
+            config_values.get("provider_headers_api_key_present"),
+            "true",
+        )
+        self.assertEqual(
+            config_values.get("default_model"),
+            f"microsoft-foundry/{expected_deployment}",
+        )
+        self.assertEqual(config_values.get("models_mode"), "merge")
+        self.assertEqual(config_values.get("allowlist_has_default_model"), "true")
+
+        self._log(
+            cloud_name,
+            "API key runtime validation passed",
         )
 
     def test_real_deploy_global_azure_managed_identity(self):
@@ -1663,6 +1806,27 @@ class AzureIntegrationDeploymentTests(unittest.TestCase):
             self.skipTest(
                 "Set TEST_AZURE_OPENAI_ENDPOINT and TEST_AZURE_OPENAI_DEPLOYMENT in .env "
                 "when TEST_AZURE_OPENAI_AUTH_MODE=managedIdentity."
+            )
+        self._deploy_and_cleanup(
+            GLOBAL_CLOUD, GLOBAL_LOCATION, "TEST_GLOBAL_SUBSCRIPTION_ID"
+        )
+
+    def test_real_deploy_global_azure_api_key(self):
+        if self.env.get("TEST_RUN_INTEGRATION", "0") != "1":
+            self.skipTest(
+                "Set TEST_RUN_INTEGRATION=1 in .env to enable real Azure integration tests."
+            )
+        if self.env.get("TEST_AZURE_OPENAI_AUTH_MODE", "").strip() != "apiKey":
+            self.skipTest(
+                "Set TEST_AZURE_OPENAI_AUTH_MODE=apiKey in .env to run this test."
+            )
+        openai_endpoint = self.env.get("TEST_AZURE_OPENAI_ENDPOINT", "").strip()
+        openai_deployment = self.env.get("TEST_AZURE_OPENAI_DEPLOYMENT", "").strip()
+        openai_api_key = self.env.get("TEST_AZURE_OPENAI_API_KEY", "").strip()
+        if not openai_endpoint or not openai_deployment or not openai_api_key:
+            self.skipTest(
+                "Set TEST_AZURE_OPENAI_ENDPOINT, TEST_AZURE_OPENAI_DEPLOYMENT, and TEST_AZURE_OPENAI_API_KEY in .env "
+                "when TEST_AZURE_OPENAI_AUTH_MODE=apiKey."
             )
         self._deploy_and_cleanup(
             GLOBAL_CLOUD, GLOBAL_LOCATION, "TEST_GLOBAL_SUBSCRIPTION_ID"
