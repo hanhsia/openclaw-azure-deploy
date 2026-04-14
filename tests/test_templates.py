@@ -361,6 +361,58 @@ class AzureDeployTemplateTests(unittest.TestCase):
         )
         self.assertIn("OPENCLAW_NO_RESPAWN=1", self.bootstrap_script)
         self.assertIn(
+            'for _ in 1 2 3 4 5 6 7 8 9 10; do\n  if [ -b "$DATA_DEVICE" ]; then\n    break\n  fi\n  sleep 2\ndone',
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            'echo "Azure data disk was not found at $DATA_DEVICE" >&2',
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            'DATA_HOME_BIND_ENTRY="/data /home/{5} none bind,nofail,x-systemd.requires=data.mount,x-systemd.after=data.mount 0 0"',
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            "mkdir -p /data",
+            self.bootstrap_script,
+        )
+        self.assertNotIn(
+            "mkdir -p /data /data/workspace",
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            "install -d -o {5} -g {5} /home/{5} /data",
+            self.bootstrap_script,
+        )
+        self.assertNotIn(
+            "install -d -o {5} -g {5} /home/{5} /data /data/workspace",
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            "cp -a /home/{5}/. /data/",
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            "mount /home/{5}",
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            "install -d -o {5} -g {5} /home/{5}/workspace",
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            "chown -R {5}:{5} /home/{5}",
+            self.bootstrap_script,
+        )
+        self.assertNotIn(
+            "chown -R {5}:{5} /data",
+            self.bootstrap_script,
+        )
+        self.assertNotIn(
+            "ln -s /data /home/{5}/.openclaw",
+            self.bootstrap_script,
+        )
+        self.assertIn(
             "install -d -o {5} -g {5} /home/{5}/.openclaw/cache/node-compile",
             self.bootstrap_script,
         )
@@ -459,7 +511,7 @@ class AzureDeployTemplateTests(unittest.TestCase):
             self.bootstrap_script,
         )
         self.assertIn(
-            'run_admin_bus_bash \'. /etc/openclaw/openclaw.env && cd "$HOME" && exec /usr/local/bin/openclaw onboard --non-interactive --accept-risk --mode local --workspace /data/workspace --auth-choice skip --gateway-port "$OPENCLAW_GATEWAY_PORT" --gateway-bind loopback --gateway-auth token --gateway-token "$OPENCLAW_GATEWAY_TOKEN" --install-daemon --daemon-runtime node --skip-channels --skip-skills --json\'',
+            'run_admin_bus_bash \'. /etc/openclaw/openclaw.env && cd "$HOME" && exec /usr/local/bin/openclaw onboard --non-interactive --accept-risk --mode local --workspace "$HOME/workspace" --auth-choice skip --gateway-port "$OPENCLAW_GATEWAY_PORT" --gateway-bind loopback --gateway-auth token --gateway-token "$OPENCLAW_GATEWAY_TOKEN" --install-daemon --daemon-runtime node --skip-channels --skip-skills --json\'',
             self.bootstrap_script,
         )
         self.assertNotIn(
@@ -511,6 +563,45 @@ class AzureDeployTemplateTests(unittest.TestCase):
             self.bootstrap_script,
         )
         self.assertIn("command -v openclaw >/dev/null 2>&1", self.bootstrap_script)
+        self.assertIn(
+            'OPENCLAW_NODE_BIN="$OPENCLAW_STATE_DIR/tools/node/bin/node"',
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            'OPENCLAW_DIST_DIR="$OPENCLAW_STATE_DIR/lib/node_modules/openclaw/dist"',
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            "const [stateDir] = process.argv.slice(2);",
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            'await fs.readFile(`${stateDir}/identity/device.json`, "utf8")',
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            "const [modulePath, stateDir, targetDeviceId] = process.argv.slice(2);",
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            "const [modulePath, stateDir, excludePath, targetDeviceId] = process.argv.slice(2);",
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            "const [modulePath, stateDir, requestId] = process.argv.slice(2);",
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            "const list = await listPairing(stateDir);",
+            self.bootstrap_script,
+        )
+        self.assertIn(
+            "const approved = await approvePairing(requestId, stateDir);",
+            self.bootstrap_script,
+        )
+        self.assertNotIn('"/data/identity/device.json"', self.bootstrap_script)
+        self.assertNotIn('listPairing("/data")', self.bootstrap_script)
+        self.assertNotIn('approvePairing(requestId, "/data")', self.bootstrap_script)
         self.assertIn("list_browser_request_id()", self.bootstrap_script)
         self.assertIn("approve_browser_request()", self.bootstrap_script)
         self.assertIn("text.find(chr(123))", self.bootstrap_script)

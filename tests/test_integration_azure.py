@@ -306,6 +306,8 @@ class AzureIntegrationDeploymentTests(unittest.TestCase):
                 '&& printf "az_path=%s\\n" "$(command -v az || true)" '
                 '&& printf "openclaw_version=%s\\n" "$(/usr/local/bin/openclaw --version | head -n 1)" '
                 '&& printf "node_version=%s\\n" "$(/home/{user}/.openclaw/tools/node/bin/node -v)" '
+                '&& printf "data_mount_source=%s\\n" "$(findmnt -n -o SOURCE --target /data)" '
+                '&& printf "home_mount_source=%s\\n" "$(findmnt -n -o SOURCE --target "$HOME")" '
                 '&& printf "state_dir=%s\\n" "$OPENCLAW_STATE_DIR" '
                 '&& printf "config_path=%s\\n" "$OPENCLAW_CONFIG_PATH" '
                 '&& printf "compile_cache=%s\\n" "$NODE_COMPILE_CACHE" '
@@ -353,6 +355,10 @@ class AzureIntegrationDeploymentTests(unittest.TestCase):
         )
         self.assertTrue(values.get("openclaw_version", "").startswith("OpenClaw "))
         self.assertEqual(values.get("node_version"), "v24.14.0")
+        self.assertEqual(
+            values.get("data_mount_source"),
+            values.get("home_mount_source"),
+        )
         self.assertEqual(
             values.get("state_dir"),
             f"/home/{DEFAULT_ADMIN_USERNAME}/.openclaw",
