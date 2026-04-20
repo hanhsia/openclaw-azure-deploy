@@ -271,7 +271,7 @@ class AzureDeployTemplateTests(unittest.TestCase):
 
     def test_bootstrap_script_trusts_loopback_reverse_proxy(self):
         self.assertIn(
-            'run_openclaw_config_json gateway.trustedProxies \'["127.0.0.1","::1"]\'',
+            'queue_openclaw_config_json gateway.trustedProxies \'["127.0.0.1","::1"]\'',
             self.bootstrap_script,
         )
 
@@ -290,24 +290,29 @@ class AzureDeployTemplateTests(unittest.TestCase):
         self.assertIn("openclaw-gateway-mode", self.bootstrap_script)
         self.assertIn("openclaw-use-public-gateway", self.bootstrap_script)
         self.assertIn("openclaw-use-loopback-gateway", self.bootstrap_script)
-        self.assertIn(
-            'openclaw gateway call device.pair.list --json --params "{}"',
+        # openclaw-approve-browser uses the installed device-pairing Node
+        # module directly to avoid the 27s CLI cold-start and the 45s
+        # `gateway connect failed: pairing required` timeout in `openclaw
+        # devices list`, so the slow CLI paths should NOT appear in the
+        # embedded script.
+        self.assertNotIn(
+            "openclaw gateway call device.pair.list",
+            self.bootstrap_script,
+        )
+        self.assertNotIn(
+            "openclaw devices list --json",
             self.bootstrap_script,
         )
         self.assertIn(
-            "openclaw devices list --json 2>&1",
+            "device-pairing-*.js",
             self.bootstrap_script,
         )
         self.assertIn(
-            "openclaw gateway call device.pair.approve --json --params",
+            'name === "listDevicePairing"',
             self.bootstrap_script,
         )
         self.assertIn(
-            'openclaw devices approve "$request_id" --json 2>&1',
-            self.bootstrap_script,
-        )
-        self.assertIn(
-            "payload.get('pending') or []",
+            'name === "approveDevicePairing"',
             self.bootstrap_script,
         )
         self.assertIn(
@@ -518,23 +523,19 @@ class AzureDeployTemplateTests(unittest.TestCase):
             "--gateway-token-ref-env OPENCLAW_GATEWAY_TOKEN", self.bootstrap_script
         )
         self.assertIn(
-            "run_openclaw_config_json gateway.controlUi.enabled true",
+            "queue_openclaw_config_json gateway.controlUi.enabled true",
             self.bootstrap_script,
         )
         self.assertIn(
-            'run_openclaw_config_json gateway.controlUi.allowedOrigins "$OPENCLAW_ALLOWED_ORIGINS_JSON"',
+            'queue_openclaw_config_json gateway.controlUi.allowedOrigins "$OPENCLAW_ALLOWED_ORIGINS_JSON"',
+            self.bootstrap_script,
+        )
+        self.assertNotIn(
+            "openclaw config validate",
             self.bootstrap_script,
         )
         self.assertIn(
-            'run_admin_bus_bash \'./etc/openclaw/openclaw.env && cd "$HOME" && exec /usr/local/bin/openclaw config set --strict-json -- "$1" "$2"\''.replace(
-                "'./", "'. /"
-            ),
-            self.bootstrap_script,
-        )
-        self.assertIn(
-            'run_admin_bus_bash \'./etc/openclaw/openclaw.env && cd "$HOME" && exec /usr/local/bin/openclaw config set -- "$1" "$2"\''.replace(
-                "'./", "'. /"
-            ),
+            "apply_openclaw_config_batch",
             self.bootstrap_script,
         )
         self.assertIn(
@@ -542,11 +543,11 @@ class AzureDeployTemplateTests(unittest.TestCase):
             self.bootstrap_script,
         )
         self.assertIn(
-            'run_openclaw_config_string channels.feishu.accounts.main.appId "$OPENCLAW_FEISHU_APP_ID"',
+            'queue_openclaw_config_string channels.feishu.accounts.main.appId "$OPENCLAW_FEISHU_APP_ID"',
             self.bootstrap_script,
         )
         self.assertIn(
-            'run_openclaw_config_string channels.msteams.appId "$OPENCLAW_MSTEAMS_APP_ID"',
+            'queue_openclaw_config_string channels.msteams.appId "$OPENCLAW_MSTEAMS_APP_ID"',
             self.bootstrap_script,
         )
         self.assertIn(
@@ -554,7 +555,7 @@ class AzureDeployTemplateTests(unittest.TestCase):
             self.bootstrap_script,
         )
         self.assertIn(
-            'run_openclaw_config_json models.providers.microsoft-foundry "$OPENCLAW_AZURE_OPENAI_PROVIDER_JSON"',
+            'queue_openclaw_config_json models.providers.microsoft-foundry "$OPENCLAW_AZURE_OPENAI_PROVIDER_JSON"',
             self.bootstrap_script,
         )
         self.assertNotIn(".openclaw-env.sh", arm_bootstrap_script)
@@ -562,7 +563,6 @@ class AzureDeployTemplateTests(unittest.TestCase):
             "systemctl --user is-active openclaw-gateway",
             self.bootstrap_script,
         )
-        self.assertIn("command -v openclaw >/dev/null 2>&1", self.bootstrap_script)
         self.assertIn(
             'OPENCLAW_NODE_BIN="$OPENCLAW_STATE_DIR/tools/node/bin/node"',
             self.bootstrap_script,
@@ -604,12 +604,10 @@ class AzureDeployTemplateTests(unittest.TestCase):
         self.assertNotIn('approvePairing(requestId, "/data")', self.bootstrap_script)
         self.assertIn("list_browser_request_id()", self.bootstrap_script)
         self.assertIn("approve_browser_request()", self.bootstrap_script)
-        self.assertIn("text.find(chr(123))", self.bootstrap_script)
-        self.assertIn("payload.get('device') or {}", self.bootstrap_script)
         self.assertNotIn('PAIRING_LIST_JS_B64="', self.bootstrap_script)
         self.assertNotIn('PAIRING_APPROVE_JS_B64="', self.bootstrap_script)
         self.assertIn(
-            "OpenClaw CLI was not found in PATH",
+            "OpenClaw device pairing module was not found",
             self.bootstrap_script,
         )
         self.assertIn(
@@ -651,27 +649,8 @@ class AzureDeployTemplateTests(unittest.TestCase):
             "text = sys.stdin.read(); start = text.find(chr(123))",
             arm_bootstrap_script,
         )
-        self.assertIn("command -v openclaw >/dev/null 2>&1", arm_bootstrap_script)
-        self.assertIn(
-            "openclaw gateway call device.pair.list --json --params",
-            arm_bootstrap_script,
-        )
-        self.assertIn(
-            "openclaw devices list --json 2>&1",
-            arm_bootstrap_script,
-        )
-        self.assertIn(
-            "openclaw gateway call device.pair.approve --json --params",
-            arm_bootstrap_script,
-        )
-        self.assertIn(
-            'openclaw devices approve "$request_id" --json 2>&1',
-            arm_bootstrap_script,
-        )
         self.assertIn("list_browser_request_id()", arm_bootstrap_script)
         self.assertIn("approve_browser_request()", arm_bootstrap_script)
-        self.assertIn("text.find(chr(123))", arm_bootstrap_script)
-        self.assertIn("payload.get(''device'') or {{}}", arm_bootstrap_script)
         self.assertNotIn('PAIRING_LIST_JS_B64="', arm_bootstrap_script)
         self.assertNotIn('PAIRING_APPROVE_JS_B64="', arm_bootstrap_script)
 
@@ -917,16 +896,10 @@ class AzureDeployTemplateTests(unittest.TestCase):
         arm_bootstrap_script = self.template["variables"]["bootstrapScript"]
         format_string = extract_arm_format_string(arm_bootstrap_script)
 
-        self.assertIn(
-            'openclaw gateway call device.pair.list --json --params "{{}}"',
-            format_string,
-        )
-        self.assertIn(
-            "openclaw devices list --json 2>&1",
-            format_string,
-        )
+        self.assertIn('name === "listDevicePairing"', format_string)
+        self.assertIn('name === "approveDevicePairing"', format_string)
         self.assertIn("OPENCLAW_ALLOWED_ORIGINS_JSON='{13}'", format_string)
-        self.assertIn("run_openclaw_config_string() {{", format_string)
+        self.assertIn("queue_openclaw_config_string() {{", format_string)
 
         validate_arm_format_literal(format_string)
 
@@ -1022,7 +995,7 @@ class AzureDeployTemplateTests(unittest.TestCase):
         self.assertEqual(vm_size_element["count"], 1)
         self.assertEqual(
             vm_size_element["recommendedSizes"],
-            ["Standard_B2as_v2", "Standard_D2as_v5", "Standard_D4as_v5"],
+            ["Standard_D2as_v5", "Standard_D4as_v5", "Standard_B2as_v2"],
         )
         self.assertNotIn("constraints", vm_size_element)
 
@@ -1174,11 +1147,11 @@ class AzureDeployTemplateTests(unittest.TestCase):
         self.assertIn('"key": "__entra_id_dynamic__"', self.bootstrap_script)
         self.assertIn('"authMethod": "entra-id"', self.bootstrap_script)
         self.assertIn(
-            'run_openclaw_config_json auth.profiles \'{"microsoft-foundry:entra":{"provider":"microsoft-foundry","mode":"api_key"}}\'',
+            'queue_openclaw_config_json auth.profiles \'{"microsoft-foundry:entra":{"provider":"microsoft-foundry","mode":"api_key"}}\'',
             self.bootstrap_script,
         )
         self.assertIn(
-            'run_openclaw_config_json auth.order \'{"microsoft-foundry":["microsoft-foundry:entra"]}\'',
+            'queue_openclaw_config_json auth.order \'{"microsoft-foundry":["microsoft-foundry:entra"]}\'',
             self.bootstrap_script,
         )
         self.assertIn("cognitiveservices.azure.com", self.bootstrap_script)
@@ -1200,22 +1173,22 @@ class AzureDeployTemplateTests(unittest.TestCase):
 
     def test_bootstrap_script_sets_foundry_model_allowlist(self):
         self.assertIn(
-            'run_openclaw_config_json agents.defaults.models "{\\"microsoft-foundry/$OPENCLAW_AZURE_OPENAI_DEPLOYMENT\\":{}}"',
+            'queue_openclaw_config_json agents.defaults.models "{\\"microsoft-foundry/$OPENCLAW_AZURE_OPENAI_DEPLOYMENT\\":{}}"',
             self.bootstrap_script,
         )
 
     def test_bootstrap_script_uses_foundry_provider_for_api_key_auth(self):
         arm_bootstrap_script = self.template["variables"]["bootstrapScript"]
         self.assertIn(
-            'run_openclaw_config_string agents.defaults.model.primary "microsoft-foundry/$OPENCLAW_AZURE_OPENAI_DEPLOYMENT"',
+            'queue_openclaw_config_string agents.defaults.model.primary "microsoft-foundry/$OPENCLAW_AZURE_OPENAI_DEPLOYMENT"',
             self.bootstrap_script,
         )
         self.assertIn(
-            'run_openclaw_config_json models.providers.microsoft-foundry "$OPENCLAW_AZURE_OPENAI_PROVIDER_JSON"',
+            'queue_openclaw_config_json models.providers.microsoft-foundry "$OPENCLAW_AZURE_OPENAI_PROVIDER_JSON"',
             self.bootstrap_script,
         )
         self.assertIn(
-            'run_openclaw_config_json agents.defaults.models "{\\"microsoft-foundry/$OPENCLAW_AZURE_OPENAI_DEPLOYMENT\\":{}}"',
+            'queue_openclaw_config_json agents.defaults.models "{\\"microsoft-foundry/$OPENCLAW_AZURE_OPENAI_DEPLOYMENT\\":{}}"',
             self.bootstrap_script,
         )
         self.assertIn('"authHeader": false', self.bootstrap_script)
@@ -1224,11 +1197,11 @@ class AzureDeployTemplateTests(unittest.TestCase):
             self.bootstrap_script,
         )
         self.assertIn(
-            'run_openclaw_config_json models.providers.microsoft-foundry "$OPENCLAW_AZURE_OPENAI_PROVIDER_JSON"',
+            'queue_openclaw_config_json models.providers.microsoft-foundry "$OPENCLAW_AZURE_OPENAI_PROVIDER_JSON"',
             arm_bootstrap_script,
         )
         self.assertIn(
-            'run_openclaw_config_string agents.defaults.model.primary "microsoft-foundry/$OPENCLAW_AZURE_OPENAI_DEPLOYMENT"',
+            'queue_openclaw_config_string agents.defaults.model.primary "microsoft-foundry/$OPENCLAW_AZURE_OPENAI_DEPLOYMENT"',
             arm_bootstrap_script,
         )
 

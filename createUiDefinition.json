@@ -68,9 +68,9 @@
         "label": "VM Size",
         "toolTip": "Choose the VM size for the OpenClaw host. The list is filtered by the selected region and Linux support.",
         "recommendedSizes": [
-          "Standard_B2as_v2",
           "Standard_D2as_v5",
-          "Standard_D4as_v5"
+          "Standard_D4as_v5",
+          "Standard_B2as_v2"
         ],
         "osPlatform": "Linux",
         "count": 1

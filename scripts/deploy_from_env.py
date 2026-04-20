@@ -146,7 +146,7 @@ def resolve_config(env: dict[str, str]) -> DeploymentConfig:
     root_name = sanitize_name(require_env(env, "ROOT_NAME"))
     subscription_id = resolve_subscription_id(env, cloud_name)
     admin_username = pick_env(env, "ADMIN_USERNAME", default="azureuser")
-    vm_size = pick_env(env, "VM_SIZE", default="Standard_B2as_v2")
+    vm_size = pick_env(env, "VM_SIZE", default="Standard_D2as_v5")
     data_disk_raw = pick_env(env, "DATA_DISK_SIZE_GB")
     data_disk_size_gb = int(data_disk_raw) if data_disk_raw else None
     hostname = pick_env(env, "HOSTNAME")

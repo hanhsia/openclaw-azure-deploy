@@ -267,31 +267,19 @@ class AzureIntegrationDeploymentTests(unittest.TestCase):
         script_stdout, _ = self._run_ssh(
             cloud_name,
             vm_public_fqdn,
-            "sed -n '1,120p' /usr/local/bin/openclaw-approve-browser",
+            "sed -n '1,160p' /usr/local/bin/openclaw-approve-browser",
         )
         self.assertNotIn(
             'gateway_url="ws://127.0.0.1:${OPENCLAW_GATEWAY_PORT}"', script_stdout
         )
-        self.assertIn(
-            'openclaw gateway call device.pair.list --json --params "{}"',
-            script_stdout,
-        )
-        self.assertIn(
-            "openclaw devices list --json 2>&1",
-            script_stdout,
-        )
-        self.assertIn(
-            "openclaw gateway call device.pair.approve --json --params",
-            script_stdout,
-        )
-        self.assertIn(
-            'openclaw devices approve "$request_id" --json 2>&1',
-            script_stdout,
-        )
+        self.assertIn("device-pairing-*.js", script_stdout)
+        self.assertIn('name === "listDevicePairing"', script_stdout)
+        self.assertIn('name === "approveDevicePairing"', script_stdout)
         self.assertIn("list_browser_request_id()", script_stdout)
         self.assertIn("approve_browser_request()", script_stdout)
+        self.assertNotIn("openclaw gateway call device.pair.list", script_stdout)
+        self.assertNotIn("openclaw devices list --json", script_stdout)
         self.assertNotIn("openclaw devices approve --latest", script_stdout)
-        self.assertNotIn("device-pairing-*.js", script_stdout)
 
     def _validate_runtime_install_state(
         self, cloud_name, vm_public_fqdn, expect_msteams_runtime=False
@@ -349,10 +337,26 @@ class AzureIntegrationDeploymentTests(unittest.TestCase):
             values.get("npm_path"),
             f"/home/{DEFAULT_ADMIN_USERNAME}/.openclaw/tools/node/bin/npm",
         )
-        self.assertTrue(
-            values.get("az_path", "").endswith("/az"),
-            "Azure CLI must be installed on the VM and available in PATH",
+        # Azure CLI is only installed when Azure OpenAI is configured in
+        # managedIdentity mode (needed for `az login --identity` /
+        # `az account get-access-token`). In apiKey and none modes the bootstrap
+        # intentionally skips the ~50s apt install of azure-cli.
+        expected_az_installed = (
+            self.env.get("TEST_AZURE_OPENAI_AUTH_MODE", "").strip() == "managedIdentity"
         )
+        if expected_az_installed:
+            self.assertTrue(
+                values.get("az_path", "").endswith("/az"),
+                "Azure CLI must be installed on the VM and available in PATH "
+                "when azureOpenAiAuthMode=managedIdentity",
+            )
+        else:
+            self.assertEqual(
+                values.get("az_path", ""),
+                "",
+                "Azure CLI should not be installed when azureOpenAiAuthMode "
+                "is not managedIdentity (to save bootstrap time)",
+            )
         self.assertTrue(values.get("openclaw_version", "").startswith("OpenClaw "))
         self.assertEqual(values.get("node_version"), "v24.14.0")
         self.assertEqual(
@@ -377,7 +381,11 @@ class AzureIntegrationDeploymentTests(unittest.TestCase):
             values.get("install_package_dir"),
             f"/home/{DEFAULT_ADMIN_USERNAME}/.openclaw/lib/node_modules/openclaw",
         )
-        self.assertTrue(values.get("gateway_entrypoint", "").endswith("/dist/entry.js"))
+        self.assertTrue(
+            values.get("gateway_entrypoint", "").endswith(
+                ("/dist/entry.js", "/dist/index.js")
+            )
+        )
         self.assertTrue(values.get("gateway_package_dir", "").endswith("/openclaw"))
         self.assertEqual(values.get("gateway_state"), "active")
         if self.env.get("TEST_FEISHU_APP_ID") and self.env.get(

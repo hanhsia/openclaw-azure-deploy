@@ -77,7 +77,7 @@ Managed Identity 模式下，模板会自动尝试为 VM 分配 `Cognitive Servi
    - `vmName`：虚拟机名称
    - `adminUsername`：SSH 用户名（默认 `azureuser`）
    - `sshPublicKey`：粘贴第 1 步获得的 SSH 公钥内容
-   - `vmSize`：虚拟机规格（默认 `Standard_B2as_v2`）
+   - `vmSize`：虚拟机规格（默认 `Standard_D2as_v5`）
    - Azure OpenAI 相关参数（可选，见第 2 步）
    - 飞书 / Teams 通道参数（可选，见第 3 步）
 4. 点击**查看 + 创建** → **创建**，等待部署完成。
@@ -347,7 +347,7 @@ Provide both parameters during deployment (or leave both empty). The template au
    - `vmName`: virtual machine name
    - `adminUsername`: SSH username (default `azureuser`)
    - `sshPublicKey`: paste the SSH public key from Step 1
-   - `vmSize`: virtual machine size (default `Standard_B2as_v2`)
+   - `vmSize`: virtual machine size (default `Standard_D2as_v5`)
    - Azure OpenAI parameters (optional, see Step 2)
    - Feishu / Teams channel parameters (optional, see Step 3)
 4. Click **Review + create** → **Create** and wait for deployment to finish.
